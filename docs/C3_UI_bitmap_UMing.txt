@@ -1,0 +1,10 @@
+C3 UI bitmap subset (2026-11-27)
+Source: AR PL UMing CN v0.2.20080216.1, Debian fonts-arphic-uming package.
+Upstream: http://www.freedesktop.org/wiki/Software/CJKUnifonts
+Original: AR PL Mingti2L Big5 / AR PL SungtiL GB. Copyright 1994-1999 Arphic Technology Co., Ltd.
+Modifications to UMing: Copyright 2003-2007 Arne Goetje.
+C3 modification: native 16x16 1-bit EBLC/EBDT strike subset of 227 glyphs, packed into 16x16 C arrays. No resampling or stroke edits.
+Glyph data licensed under Arphic Public License; license reproduced in ARPHICPL.TXT. Translation strings and firmware code are independent project data.
+Full source font is not distributed. Obtain upstream font via Debian fonts-arphic-uming or upstream CJK-Unifonts.
+Source font SHA256: fe952e55617275142d9cefd4d79eade4df446517b0478b2567d9bc7df49f70e2
+Regeneration: python3 tools/gen_i18n_bitmap.py --font /path/to/uming.ttc --index 0 (requires fontTools).
