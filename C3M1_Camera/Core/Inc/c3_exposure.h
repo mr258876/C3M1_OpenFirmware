@@ -2,8 +2,20 @@
 #define C3_EXPOSURE_H
 #include <stdint.h>
 #include "c3_shutter_timing.h"
+#ifndef C3_ZOOM_LOCK_DIAG
+#define C3_ZOOM_LOCK_DIAG 0
+#endif
+#ifndef C3_ZOOM_AE_LOCK
+#define C3_ZOOM_AE_LOCK 0
+#endif
 /* v177: mainline shutter time optimization; 0 restores v173 model/writes. */
+#ifndef C3_SHUTTER_DYNAMIC_TIMING
+#define C3_SHUTTER_DYNAMIC_TIMING 0
+#endif
 /* Freeze RGB preview AWB before switching to RAW8; no new RAW AWB loop. */
+#ifndef C3_RAW_FREEZE_AWB
+#define C3_RAW_FREEZE_AWB 1
+#endif
 
 /* v0.1.69: datasheet-timing candidate. 0 retains the exact pre-v169
  * integer-row table and the old CLKRC-only RAW inheritance conversion.
@@ -13,6 +25,24 @@
  * clock, not an independently probed frequency. Build-time override keeps
  * the assumption explicit if subsequent photographic validation disagrees.
  */
+#ifndef C3_SHUTTER_DATASHEET_TIMING
+#define C3_SHUTTER_DATASHEET_TIMING 1
+#endif
+#ifndef C3_SENSOR_PCLK_HZ
+#define C3_SENSOR_PCLK_HZ 12000000u
+#endif
+#ifndef C3_RAW_CLKRC
+#define C3_RAW_CLKRC 0u
+#endif
+#if C3_SHUTTER_DYNAMIC_TIMING && (!C3_SHUTTER_DATASHEET_TIMING || C3_SENSOR_PCLK_HZ != 12000000u || C3_RAW_CLKRC != 0u)
+#error "v177 dynamic tables require 12MHz PCLK model, datasheet timing, RAW CLKRC=0"
+#endif
+#if C3_SHUTTER_DATASHEET_TIMING != 0 && C3_SHUTTER_DATASHEET_TIMING != 1
+#error "C3_SHUTTER_DATASHEET_TIMING must be 0 or 1"
+#endif
+#if C3_SENSOR_PCLK_HZ < 4000000u || C3_SENSOR_PCLK_HZ > 24000000u
+#error "C3_SENSOR_PCLK_HZ outside expected sensor PCLK range"
+#endif
 
 /* Production TSR-16: four separate 1/2/4/8 bit contacts on PF6..PF9.
  * The 0..8 detents have printed shutter targets; 9..F are unlabelled.
@@ -129,6 +159,7 @@ uint8_t c3_exposure_prepare_timing(const c3_exposure_t *s,
 uint8_t c3_exposure_apply(const c3_exposure_t *s,
                           c3_exposure_sensor_mode_t mode,
                           c3_exposure_write_t write_reg);
+#if C3_ZOOM_AE_LOCK
 /* Holds the pre-zoom 1X exposure and actual ISP WB, not DNG neutrals.
  * Lifetime: one magnification session; never persisted in Flash. */
 typedef struct {
@@ -137,6 +168,9 @@ typedef struct {
     int8_t ev;
     uint8_t warning;
 } c3_zoom_hold_t;
+#if C3_ZOOM_LOCK_DIAG
+extern uint8_t c3_zoom_read_failure;
+#endif
 uint8_t c3_zoom_hold_matches(const c3_zoom_hold_t *h,const c3_exposure_t *s);
 /* Wait callback returns success only after a fresh complete sensor frame.
  * With a callback: freeze once, at most 3 validated snapshots, no stale lock. */
@@ -150,4 +184,5 @@ uint8_t c3_zoom_hold_apply(const c3_zoom_hold_t *h,c3_exposure_sensor_mode_t mod
                            c3_exposure_read_t rd,c3_exposure_write_t wr);
 uint8_t c3_exposure_verify_manual_night(const c3_exposure_t *s,
                                         c3_exposure_read_t rd);
+#endif
 #endif

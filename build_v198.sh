@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+case "${1:-B4_514}" in
+ L1_600) rows=1; ticks=12;;
+ B4_514) rows=4; ticks=14;;
+ B4_600) rows=4; ticks=12;;
+ B4_480) rows=4; ticks=15;;
+ *) echo 'usage: build_v198.sh L1_600|B4_480|B4_514|B4_600' >&2; exit 2;;
+esac
+C3_FIFO_DMA_LIVE_ROWS=$rows C3_FIFO_DMA_LIVE_TICKS=$ticks \
+ C3_FIFO_DMA_LOAD=0 C3_FIFO_DMA_HIGH=0 C3_FIFO_DMA_MARGIN=0 C3_FIFO_DMA_PROBE=0 \
+ C3_PEAK_EXPERIMENT=4 C3_PEAK_PROFILE=0 C3_PREVIEW_PROFILE=0 \
+ C3_ROW_PACK16=0 C3_FIFO_ROW_ARM=0 C3_FIFO_ASM_MODE=0 C3_FIFO_CPU_BURST_BYTES=0 \
+ C3_DNG_ACR_MODE=1 C3_DNG_FAST_SETTLE_FRAMES=2 C3_4X_FAST_8000=1 \
+ C3_BUILD_TAG="V198_${1:-B4_514}_ACR8_F2" bash build_v182.sh

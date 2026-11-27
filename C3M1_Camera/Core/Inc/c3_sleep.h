@@ -13,6 +13,7 @@ uint8_t c3_sd_led_should_light(uint8_t write_in_progress, uint8_t recent_write,
 /* Smooth breathing ~5 seconds, 250 Hz timer; returns LED on-time in us. */
 uint16_t c3_sleep_breath_us(uint32_t elapsed_ms);
 /* PD9 open-drain. All functions below are only called in full mainline. */
+#ifndef C3_SLEEP_HOST_TEST
 void c3_sleep_led_start(void);
 void c3_sleep_led_update(uint32_t elapsed_ms);
 void c3_sleep_led_stop(void);
@@ -21,4 +22,5 @@ void c3_sleep_led_irq(void);
 void c3_sd_led_write_begin(void);
 void c3_sd_led_write_end(void);
 void c3_sd_led_poll(uint32_t now_ms);
+#endif
 #endif

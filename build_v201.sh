@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+variant="${1:-PACK32}"
+case "$variant" in
+ REF|REF_PROFILE) mode=0;;
+ PACK32|PACK32_PROFILE) mode=1;;
+ ASM|ASM_PROFILE) mode=2;;
+ FUSED|FUSED_PROFILE) mode=3;;
+ *) echo 'usage: build_v201.sh REF|PACK32|ASM|FUSED (each optionally _PROFILE)' >&2; exit 2;;
+esac
+profile=0; [[ "$variant" == *_PROFILE ]] && profile=1
+C3_DMA_UNPACK=$mode C3_PEAK_SP_CENTER_W=256 C3_FOCUS_GREEN=1 C3_LIVE_PROFILE=$profile \
+ C3_FIFO_DMA_LIVE_ROWS=4 C3_FIFO_DMA_LIVE_TICKS=14 \
+ C3_FIFO_DMA_LOAD=0 C3_FIFO_DMA_HIGH=0 C3_FIFO_DMA_MARGIN=0 C3_FIFO_DMA_PROBE=0 \
+ C3_PEAK_EXPERIMENT=4 C3_PEAK_PROFILE=0 C3_PREVIEW_PROFILE=0 \
+ C3_ROW_PACK16=0 C3_FIFO_ROW_ARM=0 C3_FIFO_ASM_MODE=0 C3_FIFO_CPU_BURST_BYTES=0 \
+ C3_DNG_ACR_MODE=1 C3_DNG_FAST_SETTLE_FRAMES=2 C3_4X_FAST_8000=1 \
+ C3_BUILD_TAG="V201_${variant}_ACR8_F2" bash build_v182.sh

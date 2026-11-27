@@ -1,8 +1,14 @@
 #include "c3_storage.h"
 #include "c3_dng.h"
 #include "c3_bmp.h"
+#ifdef C3_STORAGE_HOST_TEST
+/* Host-based fault injection uses fake FatFs and a deterministic RAW byte
+ * stream, but compiles and executes this exact production save function. */
+#include "c3_storage_host_shim.h"
+#else
 #include "c3_camera.h"
 #include "fatfs.h"
+#endif
 
 static uint8_t mounted;
 static uint32_t next_photo=1;
@@ -55,6 +61,7 @@ uint8_t c3_storage_mount(void)
     mounted=1;
     return 1;
 }
+#if C3_MENU_ACTIONS
 /* Foreground only, after explicit confirmation and with all file I/O stopped.
  * One SD drive at 0:. Reinitialize even if FatFs cached initialization. */
 extern Disk_drvTypeDef disk;
@@ -87,6 +94,7 @@ c3_format_result_t c3_storage_format_card(void)
     }
     return C3_FORMAT_OK;
 }
+#endif
 void c3_storage_invalidate(void) { mounted=0u; }
 uint32_t c3_storage_next_number(void) { return next_photo; }
 static void filename(char str[17],uint32_t num,c3_output_format_t format)
@@ -182,6 +190,10 @@ c3_save_result_t c3_storage_save(c3_output_format_t format)
                        "DNG staging buffer must end on sample boundary");
         for (uint32_t y = 0u; y < C3_RAW_HEIGHT; ++y) {
             for (uint32_t x = 0u; x < C3_RAW_WIDTH; ++x) {
+#if C3_DNG_SAMPLE_BYTES == 2
+                /* H: little-endian RAW16 = RAW8 << 8, one FIFO byte/sample. */
+                block[used++] = 0u;
+#endif
                 block[used++] = c3_camera_fifo_read_fast();
                 if (used == (UINT)sizeof(block)) {
                     if (!write_all(&file, block, used)) {
@@ -219,6 +231,7 @@ c3_save_result_t c3_storage_save(c3_output_format_t format)
         }
     }
     c3_camera_raw_read_end();
+#if C3_DNG_SOFT_PROFILE
     /* Append DNG profile AFTER the exact Bayer strip. The IFD offsets in
      * the prefix point here; a failed tail write must never publish a DNG.
      * This reuses the existing DMA-friendly 4096-byte aligned write buffer. */
@@ -227,6 +240,7 @@ c3_save_result_t c3_storage_save(c3_output_format_t format)
         if (!write_all(&file, block, C3_DNG_TAIL_BYTES))
             status = C3_SAVE_WRITE_ERROR;
     }
+#endif
     if (status == C3_SAVE_OK && f_sync(&file) != FR_OK)
         status = C3_SAVE_SYNC_ERROR;
 
@@ -253,3 +267,8 @@ finish:
     return status;
 }
 
+/* Legacy entry point retained to avoid breaking older host tools. */
+c3_save_result_t c3_storage_save_dng(void)
+{
+    return c3_storage_save(C3_OUTPUT_DNG);
+}

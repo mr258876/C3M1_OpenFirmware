@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+case "${1:-PROFILE}" in
+ PROFILE) green=0; profile=1;;
+ GREEN) green=1; profile=0;;
+ GREEN_PROFILE) green=1; profile=1;;
+ REF) green=0; profile=0;;
+ *) echo 'usage: build_v199.sh PROFILE|GREEN|GREEN_PROFILE|REF' >&2; exit 2;;
+esac
+C3_FOCUS_GREEN=$green C3_LIVE_PROFILE=$profile \
+ C3_FIFO_DMA_LIVE_ROWS=4 C3_FIFO_DMA_LIVE_TICKS=14 \
+ C3_FIFO_DMA_LOAD=0 C3_FIFO_DMA_HIGH=0 C3_FIFO_DMA_MARGIN=0 C3_FIFO_DMA_PROBE=0 \
+ C3_PEAK_EXPERIMENT=4 C3_PEAK_PROFILE=0 C3_PREVIEW_PROFILE=0 \
+ C3_ROW_PACK16=0 C3_FIFO_ROW_ARM=0 C3_FIFO_ASM_MODE=0 C3_FIFO_CPU_BURST_BYTES=0 \
+ C3_DNG_ACR_MODE=1 C3_DNG_FAST_SETTLE_FRAMES=2 C3_4X_FAST_8000=1 \
+ C3_BUILD_TAG="V199_${1:-PROFILE}_ACR8_F2" bash build_v182.sh

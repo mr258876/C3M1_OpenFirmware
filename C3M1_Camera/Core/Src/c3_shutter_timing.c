@@ -22,7 +22,14 @@ uint8_t c3_shutter_plan(c3_timing_format_t fmt, uint8_t dial,
             /* Need the CLKRC[6] bypass to get 1/8000 at VGA geometry.
              * The v176 FAST variant must be field validated; opt-out exists
              * as C3_4X_FAST_8000=0 with 1/6579 limitation. */
+#ifndef C3_4X_FAST_8000
+#define C3_4X_FAST_8000 1
+#endif
+#if C3_4X_FAST_8000
             p.dummy=716u;p.rows=1u;p.clkrc=0x40u;
+#else
+            p.dummy=128u;p.rows=1u;
+#endif
         } else if (dial==1u) {
             p.dummy=716u;p.rows=1u;
         } else {

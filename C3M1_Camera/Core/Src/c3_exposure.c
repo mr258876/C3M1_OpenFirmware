@@ -2,6 +2,9 @@
 #include "c3_rgb_timing.h"
 #include "c3_shutter_timing.h"
 
+#ifndef C3_RAW_FREEZE_AWB
+#define C3_RAW_FREEZE_AWB 1
+#endif
 
 /* Physical scale read from the photographed knob and the factory 00..08
  * display behaviour. NOT calibrated sensor exposure time. A nominal
@@ -11,6 +14,13 @@
 static const uint16_t shutter_denominators[C3_EXPOSURE_DEFINED_STEPS] = {
     8000u, 4000u, 2000u, 1000u, 500u, 300u, 150u, 100u, 50u
 };
+#if !C3_SHUTTER_DATASHEET_TIMING
+static const uint16_t shutter_rows[C3_EXPOSURE_DEFINED_STEPS] = {
+    2u, 4u, 8u, 16u, 32u, 53u, 107u, 160u, 320u
+};
+
+#endif
+#if C3_SHUTTER_DATASHEET_TIMING
 /* OV7725 Rev 1.2 frame-timing figs. 6/7: VGA 784*tP, QVGA 576*tP;
  * tP=tPCLK for RAW, tP=2*tPCLK for RGB565. Current RGB initialization
  * adds configurable 0x9E/0x80/0x40/0 horizontal dummy pixels via EXHCL;
@@ -24,12 +34,14 @@ static const uint16_t shutter_denominators[C3_EXPOSURE_DEFINED_STEPS] = {
 #define C3_PREVIEW_ZOOM_PCLK_TICKS ((784u + C3_RGB_EXHCL) * 2u)
 #define C3_RAW_VGA_PCLK_TICKS 784u
 static uint8_t preview_is_zoom4x;
+#if C3_SHUTTER_DYNAMIC_TIMING
 static c3_timing_format_t timing_format(c3_exposure_sensor_mode_t mode)
 {
     if (mode==C3_EXPOSURE_RAW) return C3_TIMING_RAW8;
     if (mode==C3_EXPOSURE_BMP) return C3_TIMING_RGB1X;
     return preview_is_zoom4x?C3_TIMING_RGB4X:C3_TIMING_RGB1X;
 }
+#endif
 void c3_exposure_set_preview_zoom(uint8_t zoom4x)
 {
     preview_is_zoom4x=(uint8_t)(zoom4x != 0u);
@@ -50,10 +62,14 @@ static uint32_t exposure_line_ticks(c3_exposure_sensor_mode_t mode,
 }
 uint32_t c3_exposure_preview_row_ns_dial(uint8_t zoom4x, uint8_t dial)
 {
+#if C3_SHUTTER_DYNAMIC_TIMING
     c3_shutter_plan_t p;
     const c3_timing_format_t fmt=zoom4x?C3_TIMING_RGB4X:C3_TIMING_RGB1X;
     if (c3_shutter_plan(fmt,dial,(uint8_t)(dial!=C3_EXPOSURE_AUTO_CODE),&p))
         return c3_shutter_row_ns(fmt,&p);
+#else
+    (void)dial;
+#endif
     return c3_exposure_preview_row_ns(zoom4x);
 }
 uint32_t c3_exposure_preview_row_ns(uint8_t zoom4x)
@@ -75,10 +91,16 @@ uint16_t c3_exposure_rows_for_mode(uint8_t code,
                                    uint8_t raw_clkrc)
 {
     if (!c3_exposure_dial_defined(code)) return 0u;
+#if !C3_SHUTTER_DATASHEET_TIMING
+    (void)mode; (void)raw_clkrc;
+    return shutter_rows[code];
+#else
+#if C3_SHUTTER_DYNAMIC_TIMING
     if (raw_clkrc==0u) {
         c3_shutter_plan_t plan;
         if (c3_shutter_plan(timing_format(mode),code,1u,&plan)) return plan.rows;
     }
+#endif
     uint32_t ticks=exposure_line_ticks(mode,raw_clkrc);
     if (!ticks) return 0u;
     uint32_t denom=(uint32_t)shutter_denominators[code] * ticks;
@@ -88,7 +110,31 @@ uint16_t c3_exposure_rows_for_mode(uint8_t code,
     if (!rows) rows=1u;
     if (rows>8191u) rows=8191u;
     return (uint16_t)rows;
+#endif
 }
+#endif
+#if !C3_SHUTTER_DATASHEET_TIMING
+/* Even with legacy register control selected, OSD can display a theoretical
+ * exposure using the current PCLK/EXHCL model rather than old AEC labels. */
+uint32_t c3_exposure_preview_row_ns_dial(uint8_t zoom4x, uint8_t dial)
+{
+#if C3_SHUTTER_DYNAMIC_TIMING
+    c3_shutter_plan_t p;
+    const c3_timing_format_t fmt=zoom4x?C3_TIMING_RGB4X:C3_TIMING_RGB1X;
+    if (c3_shutter_plan(fmt,dial,(uint8_t)(dial!=C3_EXPOSURE_AUTO_CODE),&p))
+        return c3_shutter_row_ns(fmt,&p);
+#else
+    (void)dial;
+#endif
+    return c3_exposure_preview_row_ns(zoom4x);
+}
+uint32_t c3_exposure_preview_row_ns(uint8_t zoom4x)
+{
+    const uint32_t ticks = (zoom4x ? 784u : 576u) + C3_RGB_EXHCL;
+    return (uint32_t)(((uint64_t)ticks * 2u * 1000000000ull +
+                      C3_SENSOR_PCLK_HZ/2u) / C3_SENSOR_PCLK_HZ);
+}
+#endif
 /* OV7725 gain code, not a calibrated ISO number. */
 static const uint8_t gains[C3_EXPOSURE_GAIN_STEPS] = {
     0x00u, 0x00u, 0x10u, 0x30u, 0x70u, 0xF0u
@@ -167,7 +213,11 @@ uint16_t c3_exposure_target_denominator(uint8_t code)
 }
 uint16_t c3_exposure_rows(uint8_t code)
 {
+#if C3_SHUTTER_DATASHEET_TIMING
     return c3_exposure_rows_for_mode(code,C3_EXPOSURE_PREVIEW,0u);
+#else
+    return c3_exposure_dial_defined(code) ? shutter_rows[code] : 0u;
+#endif
 }
 
 /* Single source of truth: there is no aperture-priority mode. Entering
@@ -272,6 +322,7 @@ uint8_t c3_exposure_prepare_timing(const c3_exposure_t *s,
                                     c3_exposure_read_t rd,
                                     c3_exposure_write_t wr)
 {
+#if C3_SHUTTER_DYNAMIC_TIMING
     if (!s || !rd || !wr || mode>C3_EXPOSURE_BMP) return 0u;
     const uint8_t dial=c3_exposure_effective_dial(s);
     const uint8_t manual=(uint8_t)(dial!=C3_EXPOSURE_AUTO_CODE);
@@ -298,6 +349,11 @@ uint8_t c3_exposure_prepare_timing(const c3_exposure_t *s,
             hi==new_exh && lo==(uint8_t)p.dummy && clk==p.clkrc) return 1u;
     }
     return 0u;
+#else
+    if (!s || !rd || !wr || mode>C3_EXPOSURE_BMP) return 0u;
+    if (c3_exposure_effective_dial(s)==C3_EXPOSURE_AUTO_CODE) return 1u;
+    return clear_manual_night_rows(mode==C3_EXPOSURE_RAW?0x00u:0xFAu,rd,wr);
+#endif
 }
 
 uint8_t c3_exposure_apply(const c3_exposure_t *s,
@@ -311,17 +367,25 @@ uint8_t c3_exposure_apply(const c3_exposure_t *s,
                          (s->gain_step ? C3_SHOOT_M : C3_SHOOT_S)) ||
         (s->shoot_mode == C3_SHOOT_P && s->gain_step != 0u) ||
         s->ev_half_steps < -6 || s->ev_half_steps > 6 ||
+#if C3_SHUTTER_DATASHEET_TIMING
         mode > C3_EXPOSURE_BMP) return 0u;
+#else
+        mode > C3_EXPOSURE_RAW) return 0u;
+#endif
 
     uint8_t dial = c3_exposure_effective_dial(s);
     uint8_t gain = c3_exposure_effective_gain(s); /* P/S: AGC */
     uint8_t auto_exposure = (uint8_t)(dial == C3_EXPOSURE_AUTO_CODE);
     /* Preview COM8 base = 0xFA; RAW base = 0x02. AEC bit0, AGC bit2.
      * Disable automatic controls while applying manual exposure. */
+#if C3_RAW_FREEZE_AWB
     /* RAW Bayer pixels do not use ISP AWB. The DNG neutral was captured
      * from the live RGB preview BEFORE changing COM7; do not run a second
      * RAW AWB convergence loop. Preserve AEC/AGC independently. */
     uint8_t base = (mode == C3_EXPOSURE_RAW) ? 0x00u : 0xFAu;
+#else
+    uint8_t base = (mode == C3_EXPOSURE_RAW) ? 0x02u : 0xFAu;
+#endif
     uint8_t final = (uint8_t)(base | (auto_exposure ? 0x01u : 0u) |
                                      (gain == 0u ? 0x04u : 0u));
 
@@ -339,7 +403,11 @@ uint8_t c3_exposure_apply(const c3_exposure_t *s,
     if (wr(0x25u, aeb)) return 0u;
     if (wr(0x26u, vpt)) return 0u;
     if (!auto_exposure) {
+#if C3_SHUTTER_DATASHEET_TIMING
         uint16_t rows = c3_exposure_rows_for_mode(dial,mode,C3_RAW_CLKRC);
+#else
+        uint16_t rows = c3_exposure_rows(dial);
+#endif
         /* LAEC sub-row value must not remain stale from auto exposure.
          * Explicitly zero it until a calibrated fractional-row path exists. */
         if (wr(0x1Fu, 0x00u)) return 0u;
@@ -384,6 +452,7 @@ uint8_t c3_exposure_snapshot_read(c3_exposure_snapshot_t *out,
 
 uint16_t c3_exposure_raw_rows(uint16_t preview_rows, uint8_t raw_clkrc)
 {
+#if C3_SHUTTER_DATASHEET_TIMING
     /* Preserve exposure time across QVGA/VGA format, pixel packing and CLKRC. */
     uint32_t src_ticks=exposure_line_ticks(C3_EXPOSURE_PREVIEW,0u);
     uint32_t dst_ticks=exposure_line_ticks(C3_EXPOSURE_RAW,raw_clkrc);
@@ -392,6 +461,18 @@ uint16_t c3_exposure_raw_rows(uint16_t preview_rows, uint8_t raw_clkrc)
     if (rows==0u) rows=1u;
     if (rows>8191u) rows=8191u;
     return (uint16_t)rows;
+#else
+
+    /* Preview uses PLL4/CLKRC=0. RAW is also PLL4, but CLKRC=1 currently
+     * doubles internal clock division. Approximate RAW row integration time
+     * as 2x preview when CLKRC=1, so halve AEC rows; for CLKRC=0 keep rows.
+     * VGA/QVGA blanking/window effects and LAEC need bench calibration. */
+    uint32_t divider=(uint32_t)((raw_clkrc & 0x3Fu)+1u);
+    uint32_t rows=((uint32_t)preview_rows+divider/2u)/divider;
+    if (rows==0u) rows=1u;
+    if (rows>8191u) rows=8191u;
+    return (uint16_t)rows;
+#endif
 }
 
 uint8_t c3_exposure_apply_raw_locked(const c3_exposure_snapshot_t *shot,
@@ -405,7 +486,11 @@ uint8_t c3_exposure_apply_raw_locked(const c3_exposure_snapshot_t *shot,
     /* Disable AEC/AGC while restoring the preview exposure snapshot.
      * When freezing RAW AWB, also clear COM8[1]. The separate preview AWB
      * snapshot is already stored in c3_dng.c for DNG metadata and RGB restore. */
+#if C3_RAW_FREEZE_AWB
     if (wr(0x13u,0x00u)) return 0u;
+#else
+    if (wr(0x13u,0x02u)) return 0u;
+#endif
     if (wr(0x1Fu,0x00u)) return 0u; /* provisional fine AEC not calibrated */
     if (wr(0x08u,(uint8_t)(rows>>8u))) return 0u;
     if (wr(0x10u,(uint8_t)rows)) return 0u;
@@ -418,6 +503,7 @@ uint8_t c3_exposure_apply_raw_locked_timed(const c3_exposure_snapshot_t *shot,
                                            uint8_t raw_clkrc,
                                            c3_exposure_write_t wr)
 {
+#if C3_SHUTTER_DYNAMIC_TIMING
     if (!shot || !shot->valid || !state || !wr || raw_clkrc>1u ||
         shot->preview_rows==0u || shot->preview_rows>8191u ||
         shot->gain_register==0xFFu) return 0u;
@@ -432,6 +518,10 @@ uint8_t c3_exposure_apply_raw_locked_timed(const c3_exposure_snapshot_t *shot,
         wr(0x08u,(uint8_t)(rows>>8u)) || wr(0x10u,(uint8_t)rows) ||
         wr(0x00u,shot->gain_register)) return 0u;
     return 1u;
+#else
+    (void)state;
+    return c3_exposure_apply_raw_locked(shot,raw_clkrc,wr);
+#endif
 }
 
 /* This operation runs with COM8 AEC/AGC/AWB all disabled following the
@@ -452,6 +542,10 @@ uint8_t c3_exposure_restore_preview_snapshot(const c3_exposure_snapshot_t *shot,
     return 1u;
 }
 
+#if C3_ZOOM_AE_LOCK
+#if !C3_SHUTTER_DYNAMIC_TIMING
+#error "Zoom lock requires the calibrated dynamic shutter plans"
+#endif
 static uint8_t zoom_expect(c3_exposure_read_t rd,uint8_t addr,uint8_t value,uint8_t mask)
 {
     uint8_t v;
@@ -496,8 +590,15 @@ uint16_t c3_zoom_hold_rows(const c3_zoom_hold_t *h,c3_exposure_sensor_mode_t mod
     if(!rows)rows=1u;
     return rows<=8191u?(uint16_t)rows:0u;
 }
+#if C3_ZOOM_LOCK_DIAG
+uint8_t c3_zoom_read_failure;
+#endif
 /* A failed attempt never publishes a partially valid lock. */
+#if C3_ZOOM_LOCK_DIAG
+#define ZOOM_READ_FAIL(code) do { c3_zoom_read_failure=(code); return 0u; } while(0)
+#else
 #define ZOOM_READ_FAIL(code) do { return 0u; } while(0)
+#endif
 static uint8_t zoom_read_frozen(c3_zoom_hold_t *h,const c3_exposure_t *s,
                                 c3_exposure_read_t rd)
 {
@@ -516,6 +617,9 @@ static uint8_t zoom_read_frozen(c3_zoom_hold_t *h,const c3_exposure_t *s,
     if(!c3_zoom_hold_rows(&candidate,C3_EXPOSURE_PREVIEW)||!c3_zoom_hold_rows(&candidate,C3_EXPOSURE_RAW)||
        !c3_zoom_hold_rows(&candidate,C3_EXPOSURE_BMP)) ZOOM_READ_FAIL(18u);
     *h=candidate;
+#if C3_ZOOM_LOCK_DIAG
+    c3_zoom_read_failure=0u;
+#endif
     return 1u;
 }
 uint8_t c3_zoom_hold_read_synced(c3_zoom_hold_t *h,const c3_exposure_t *s,
@@ -523,6 +627,9 @@ uint8_t c3_zoom_hold_read_synced(c3_zoom_hold_t *h,const c3_exposure_t *s,
 {
     if(!h)return 0u;
     *h=(c3_zoom_hold_t){0};
+#if C3_ZOOM_LOCK_DIAG
+    c3_zoom_read_failure=0u;
+#endif
     if(!s||!rd||!wr)return 0u;
     /* Only called in 1X, with FIFO stopped. Freeze once, then wait for a
      * fresh complete frame before taking a coherent snapshot. Never
@@ -579,3 +686,4 @@ uint8_t c3_zoom_hold_apply(const c3_zoom_hold_t *h,c3_exposure_sensor_mode_t mod
     }
     return 0u;
 }
+#endif

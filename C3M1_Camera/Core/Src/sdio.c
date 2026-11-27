@@ -26,6 +26,7 @@ uint8_t g_sd_sta = 0;
 
 SD_HandleTypeDef hsd;
 
+#if C3_SDIO_TX_DMA
 /* SDIO request is fixed to DMA2 channel 4 on STM32F103 high-density parts.
  * LCD uses DMA2 channel 1 and is not reconfigured here. */
 static DMA_HandleTypeDef c3_sd_tx_dma;
@@ -42,6 +43,7 @@ void SDIO_IRQHandler(void)
 {
     HAL_SD_IRQHandler(&hsd);
 }
+#endif
 
 /* SDIO init function */
 
@@ -102,6 +104,7 @@ void HAL_SD_MspInit(SD_HandleTypeDef* sdHandle)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     HAL_GPIO_Init(SD_CMD_GPIO_Port, &GPIO_InitStruct);
 
+#if C3_SDIO_TX_DMA
     c3_sd_dma_ready=0u;
     __HAL_RCC_DMA2_CLK_ENABLE();
     c3_sd_tx_dma.Instance=DMA2_Channel4;
@@ -122,6 +125,7 @@ void HAL_SD_MspInit(SD_HandleTypeDef* sdHandle)
       HAL_NVIC_EnableIRQ(SDIO_IRQn);
       c3_sd_dma_ready=1u;
     }
+#endif
   /* USER CODE BEGIN SDIO_MspInit 1 */
 
   /* USER CODE END SDIO_MspInit 1 */
@@ -133,12 +137,14 @@ void HAL_SD_MspDeInit(SD_HandleTypeDef* sdHandle)
 
   if(sdHandle->Instance==SDIO)
   {
+#if C3_SDIO_TX_DMA
     c3_sd_dma_ready=0u;
     HAL_NVIC_DisableIRQ(DMA2_Channel4_5_IRQn);
     HAL_NVIC_DisableIRQ(SDIO_IRQn);
     (void)HAL_DMA_DeInit(&c3_sd_tx_dma);
     sdHandle->hdmatx=(DMA_HandleTypeDef *)0;
     /* Do not disable DMA2 clock: LCD uses DMA2 channel 1. */
+#endif
   /* USER CODE BEGIN SDIO_MspDeInit 0 */
 
   /* USER CODE END SDIO_MspDeInit 0 */

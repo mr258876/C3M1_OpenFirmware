@@ -1,7 +1,19 @@
 #ifndef C3_FIFO_DMA_LIVE_PLAN_H
 #define C3_FIFO_DMA_LIVE_PLAN_H
 #include "c3_fifo_dma_plan.h"
-/* Fixed T1 with a two-tick low pulse. */
+/* Production candidates: fixed T1, unchanged two-tick low pulse. */
+#ifndef C3_FIFO_DMA_LIVE_ROWS
+#define C3_FIFO_DMA_LIVE_ROWS 0
+#endif
+#ifndef C3_FIFO_DMA_LIVE_TICKS
+#define C3_FIFO_DMA_LIVE_TICKS 14
+#endif
+#if C3_FIFO_DMA_LIVE_ROWS != 0 && C3_FIFO_DMA_LIVE_ROWS != 1 && C3_FIFO_DMA_LIVE_ROWS != 4
+#error invalid live FIFO block size
+#endif
+#if C3_FIFO_DMA_LIVE_TICKS != 12 && C3_FIFO_DMA_LIVE_TICKS != 14 && C3_FIFO_DMA_LIVE_TICKS != 15
+#error invalid live FIFO period
+#endif
 static inline uint8_t c3_live_check(unsigned n,unsigned te,unsigned pulses,
     unsigned cnt,unsigned later,unsigned high_ticks,unsigned ndtr,unsigned tc,unsigned pin_high)
 {

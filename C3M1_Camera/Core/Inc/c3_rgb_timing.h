@@ -6,4 +6,11 @@
  * exposure updates EXHCH/EXHCL/CLKRC dynamically, including RAW stills.
  * Keep the baseline consistent with RGB init and timed register restore.
  */
+#ifndef C3_RGB_EXHCL
+#define C3_RGB_EXHCL 0x9Eu
+#endif
+#if C3_RGB_EXHCL != 0x9Eu && C3_RGB_EXHCL != 0x80u && \
+    C3_RGB_EXHCL != 0x40u && C3_RGB_EXHCL != 0x00u
+#error "C3_RGB_EXHCL supports only 0x9E, 0x80, 0x40, 0x00"
+#endif
 #endif

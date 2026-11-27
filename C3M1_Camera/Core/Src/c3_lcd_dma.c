@@ -7,7 +7,12 @@
  * polls completion, and an error/timeout disables DMA for this boot.
  */
 #include "c3_lcd_dma.h"
+#if C3_LCD_DMA_ENABLE
+#if defined(C3_LCD_DMA_HOST_TEST)
+#include "c3_lcd_dma_host_shim.h"
+#else
 #include "main.h"
+#endif
 
 _Static_assert(C3_LCD_W == 320u && C3_LCD_HEIGHT == 240u,
                "DMA preview line geometry must match the panel");
@@ -23,6 +28,9 @@ volatile uint32_t c3_lcd_dma_rows_cpu;
 volatile uint32_t c3_lcd_dma_error_count;
 volatile uint32_t c3_lcd_dma_timeout_count;
 volatile uint32_t c3_lcd_dma_disabled;
+#if C3_STAGE_PROFILE
+volatile uint32_t c3_lcd_dma_wait_cycles;
+#endif
 
 #define C3_DMA_LCD_ADDR (0x6C000400u)
 #define C3_DMA_MAX_WAIT_MS 10u
@@ -76,7 +84,13 @@ static uint8_t wait_pending_impl(void)
  * itself overlaps with CPU row preparation and is NOT added twice. */
 static uint8_t wait_pending(void)
 {
+#if C3_STAGE_PROFILE
+    uint32_t started = DWT->CYCCNT;
+#endif
     uint8_t ok = wait_pending_impl();
+#if C3_STAGE_PROFILE
+    c3_lcd_dma_wait_cycles += DWT->CYCCNT - started;
+#endif
     return ok;
 }
 
@@ -100,6 +114,9 @@ static void recover_failed_line(uint16_t next_row)
 
 void c3_lcd_dma_begin(void)
 {
+#if C3_STAGE_PROFILE
+    c3_lcd_dma_wait_cycles = 0u;
+#endif
     if (!initialized) {
         __HAL_RCC_DMA2_CLK_ENABLE();
         DMA2_Channel1->CCR = 0u;
@@ -141,6 +158,9 @@ void c3_lcd_dma_submit(uint16_t row)
     pending_row = row;
     pending = 1u;
     DMA2_Channel1->CCR |= DMA_CCR_EN;
+#if defined(C3_LCD_DMA_HOST_TEST)
+    c3_lcd_dma_host_on_start(line_buf[row & 1u], row);
+#endif
 }
 
 void c3_lcd_dma_finish(void)
@@ -153,3 +173,4 @@ void c3_lcd_dma_finish(void)
     for (volatile uint32_t n = 0u; n < 80u; ++n) __NOP();
     active = 0u;
 }
+#endif

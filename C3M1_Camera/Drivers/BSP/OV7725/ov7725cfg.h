@@ -96,7 +96,16 @@
 #define TGT_Gr    0x45
 
 /* v178: RAW ABLC A/B. RGB BLC always enabled. COM13[7:5,2] defined. */
+#ifndef C3_RAW_BLC_ENABLE
+#define C3_RAW_BLC_ENABLE 1
+#endif
+#if C3_RAW_BLC_ENABLE == 1
 #define C3_RAW_COM13 0xE2u
+#elif C3_RAW_BLC_ENABLE == 0
+#define C3_RAW_COM13 0x00u
+#else
+#error "C3_RAW_BLC_ENABLE must be 0 or 1"
+#endif
 #define C3_RGB_COM13 0xE2u
 #define C3_COM13_MASK 0xE4u
 #define LC_CTR    0x46

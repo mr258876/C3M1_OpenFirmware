@@ -1,13 +1,41 @@
 #ifndef C3_SETTINGS_H
 #define C3_SETTINGS_H
 #include <stdint.h>
+#ifndef C3_POSTSHOT
+#define C3_POSTSHOT 0
+#endif
+#ifndef C3_DEFAULTS_V218
+#define C3_DEFAULTS_V218 0
+#endif
+#ifndef C3_LANGUAGE_SETUP
+#define C3_LANGUAGE_SETUP 0
+#endif
+#ifndef C3_STARTUP_HINT
+#define C3_STARTUP_HINT 0
+#endif
+#ifndef C3_FUNCTION_MENU
+#define C3_FUNCTION_MENU 0
+#endif
+#ifndef C3_MENU_ACTIONS
+#define C3_MENU_ACTIONS 0
+#endif
+#ifndef C3_I18N
+#define C3_I18N 0
+#endif
+#if C3_LANGUAGE_SETUP && (!C3_STARTUP_HINT || !C3_I18N || !C3_FUNCTION_MENU)
+#error "Language setup requires the bilingual startup-hint UI"
+#endif
+/* v202 candidate: one fixed, full-frame SP22 peak mode. */
+#ifndef C3_PEAK_FULL_SP_ONLY
+#define C3_PEAK_FULL_SP_ONLY 0
+#endif
 /* All fields are single bytes; this structure is persisted with a versioned
  * CRC-protected record. Never write it as individual naked Flash bytes. */
 typedef struct {
     uint8_t peaking;
     uint8_t color;           /* 0 red, 1 yellow, 2 cyan, 3 green */
     uint8_t sensitivity;     /* 0 low, 1 medium, 2 high */
-    uint8_t focus_score;     /* C3_SCORE_*: OFF / FULL SP */
+    uint8_t focus_score;     /* C3_SCORE_*: OFF / CENTER / CENTER SP / FULL / FULL SP */
     uint8_t fps;
     uint8_t grid;
     uint8_t monochrome;
@@ -26,19 +54,38 @@ enum {
     C3_PEAK_AREA_COUNT = 4
 };
 
+#if C3_I18N
+#if !C3_PEAK_FULL_SP_ONLY
+#error "Language reuses the retired peak area field; requires FULL SP ONLY"
+#endif
 #define C3_LANGUAGE_ZH_VALUE 4u
+#if C3_POSTSHOT
+#if !C3_LANGUAGE_SETUP || !C3_MENU_ACTIONS
+#error "Post-shot preferences require language setup and menu actions"
+#endif
 #define C3_UI_PREF_MASK 7u
 #define C3_POST_REVIEW_OFF 8u
 #define C3_POST_WIND_OFF 16u
 static inline uint8_t c3_settings_review(const c3_settings_t *s) { return !(s->peak_area & C3_POST_REVIEW_OFF); }
 static inline uint8_t c3_settings_wind(const c3_settings_t *s) { return !(s->peak_area & C3_POST_WIND_OFF); }
+#else
+#define C3_UI_PREF_MASK 255u
+#endif
 static inline uint8_t c3_settings_language(const c3_settings_t *s)
 {
     return (uint8_t)((s->peak_area & C3_UI_PREF_MASK) == C3_LANGUAGE_ZH_VALUE
+#if C3_STARTUP_HINT
                      || (s->peak_area & C3_UI_PREF_MASK) == 6u
+#endif
                      );
 }
+#endif
 
+#if C3_STARTUP_HINT
+#if !C3_I18N || !C3_FUNCTION_MENU
+#error "Startup hint requires bilingual function menu"
+#endif
+#if C3_LANGUAGE_SETUP
 /* No layout/version change. Pending is a committed reset/default record,
  * not a selected language. All prior v6 values remain valid. */
 #define C3_LANGUAGE_PENDING_VALUE 7u
@@ -46,10 +93,13 @@ static inline uint8_t c3_settings_language_pending(const c3_settings_t *s)
 {
     return (uint8_t)((s->peak_area & C3_UI_PREF_MASK) == C3_LANGUAGE_PENDING_VALUE);
 }
+#endif
 static inline uint8_t c3_settings_startup_hint(const c3_settings_t *s)
 {
     return (uint8_t)((s->peak_area & C3_UI_PREF_MASK) <= C3_LANGUAGE_ZH_VALUE
+#if C3_LANGUAGE_SETUP
                      || c3_settings_language_pending(s)
+#endif
                      );
 }
 /* Preserve both preferences without changing the v6 CRC-protected layout. */
@@ -58,11 +108,16 @@ static inline void c3_settings_set_ui_prefs(c3_settings_t *s, uint8_t zh, uint8_
     s->peak_area = (uint8_t)((s->peak_area & (uint8_t)~C3_UI_PREF_MASK) |
                           (hint ? (zh ? 4u : 3u) : (zh ? 6u : 5u)));
 }
+#endif
 
 static inline uint8_t c3_settings_peak_area(const c3_settings_t *s)
 {
+#if C3_PEAK_FULL_SP_ONLY
     (void)s;
     return C3_PEAK_AREA_FULL_SPARSE;
+#else
+    return s->peak_area < C3_PEAK_AREA_COUNT ? s->peak_area : C3_PEAK_AREA_CENTER;
+#endif
 }
 
 typedef enum {
@@ -72,6 +127,9 @@ typedef enum {
 
 enum {
     C3_SETTING_PEAK = 0,
+#if !C3_PEAK_FULL_SP_ONLY
+    C3_SETTING_PEAK_AREA,
+#endif
     C3_SETTING_COLOR,
     C3_SETTING_SENSITIVITY,
     C3_SETTING_SCORE,
@@ -81,14 +139,27 @@ enum {
     C3_SETTING_OSD,
     C3_SETTING_OUTPUT,
     C3_SETTING_ROTATION,
+#if !C3_FUNCTION_MENU
+    C3_SETTING_BATTERY, /* Read-only voltage/approximate percent */
+#endif
     C3_SETTING_SLEEP_TIMER,
+#if C3_I18N
     C3_SETTING_LANGUAGE,
+#endif
+#if C3_STARTUP_HINT
     C3_SETTING_STARTUP_HINT,
+#endif
+#if C3_POSTSHOT
     C3_SETTING_REVIEW,
     C3_SETTING_WIND,
+#endif
+#if C3_MENU_ACTIONS
     C3_SETTING_RESET,
     C3_SETTING_FORMAT,
+#endif
+#if C3_FUNCTION_MENU
     C3_SETTING_ABOUT,
+#endif
     C3_SETTINGS_COUNT
 };
 
@@ -103,7 +174,7 @@ uint16_t c3_settings_color565(const c3_settings_t *s);
 uint8_t c3_settings_peak_threshold(const c3_settings_t *s, uint8_t adaptive);
 
 /* High-density STM32F103ZET6: last two 2 KiB pages of 512 KiB Flash are
- * reserved by linker_lld.ld (FLASH LENGTH=508K). This area must not
+ * reserved by both linker scripts (FLASH LENGTH=508K). This area must not
  * contain original factory data; make a full backup before first flash. */
 #define C3_SETTINGS_PAGE_A 0x0807F000u
 #define C3_SETTINGS_PAGE_B 0x0807F800u
@@ -127,9 +198,11 @@ uint8_t c3_settings_record_valid(const c3_settings_record_t *r);
 /* Returns 0/1 for the newer valid record or 2 if neither is valid. */
 uint8_t c3_settings_select_record(const c3_settings_record_t *a,
                                   const c3_settings_record_t *b);
-/* Target Flash persistence. */
+/* Implemented on target only, not linked into host tests. */
 uint8_t c3_settings_flash_load(c3_settings_t *out);
 uint8_t c3_settings_flash_save(const c3_settings_t *settings);
+#if C3_LANGUAGE_SETUP
 /* Commit before exposing the selected language to the live settings. */
 uint8_t c3_settings_flash_confirm_language(c3_settings_t *settings, uint8_t zh);
+#endif
 #endif

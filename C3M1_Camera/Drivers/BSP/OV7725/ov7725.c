@@ -4,11 +4,119 @@
  */
 
 #include "sccb.h"
-/* RGB565 uses COM3=0xD0 and the calibrated PLL4 clock.
- * Recover isolated SCCB read glitches with repeated START; verify RAW strictly. */
+#ifndef C3_PREVIEW_PROBE
+#define C3_PREVIEW_PROBE 0
+#endif
+/* Experiment: in full RGB565 preview/BMP mode, nonfatal only when a
+ * static register readback returns 0xFF. Other mismatches remain fatal.
+ * C3_PREVIEW_PROBE keeps its existing broader warning-only behavior.
+ * Disable with C3_RGB_VERIFY_WARN_ONLY=0 to restore v0.1.25 strict gate. */
+#ifndef C3_RGB_VERIFY_WARN_ONLY
+#define C3_RGB_VERIFY_WARN_ONLY 1
+#endif
+/* RGB only: v0.1.27 0x90/0xB0 fixed vertical orientation but user
+ * confirms horizontal mirroring. Toggle ONLY COM3[6] (0x40), preserving
+ * the now-correct vertical flip and independently testable B/R swap.
+ * 0xD0 (no B/R swap) and 0xF0 (B/R swap). RAW8/DNG is untouched. */
+#ifndef C3_CAM_COM3_RGB
+#define C3_CAM_COM3_RGB 0xD0u
+#endif
+/* Only enabled in the separately marked experimental RAW build.
+ * FF means the SCCB read could not prove success; not proof of success. */
+/* 0=exact v0.1.44 SCCB verification, 1=bounded repeated-START
+ * fallback only when the legacy read did not match (mostly 0xFF).
+ * The expected value still MUST be observed; RAW remains strict. */
+#ifndef C3_SCCB_RESTART_VERIFY
+#define C3_SCCB_RESTART_VERIFY 1
+#endif
+#if (C3_SCCB_RESTART_VERIFY != 0) && (C3_SCCB_RESTART_VERIFY != 1)
+#error "C3_SCCB_RESTART_VERIFY must be 0 or 1"
+#endif
+#ifndef C3_RAW_VERIFY_WARN_IF_FF
+#define C3_RAW_VERIFY_WARN_IF_FF 0
+#endif
+#if (C3_RAW_VERIFY_WARN_IF_FF != 0) && (C3_RAW_VERIFY_WARN_IF_FF != 1)
+#error "C3_RAW_VERIFY_WARN_IF_FF must be 0 or 1"
+#endif
+#if (C3_CAM_COM3_RGB != 0xD0u) && (C3_CAM_COM3_RGB != 0xF0u)
+#error "C3_CAM_COM3_RGB only supports controlled values 0xD0 and 0xF0"
+#endif
+/* Sensor-generated test chart. Only enabled in separate read-only probe. */
+#ifndef C3_CAM_COLOR_BAR
+#define C3_CAM_COLOR_BAR 0
+#endif
+/* v0.1.55: field-validated RGB565 clock fix.  PLL 4x, CLKRC=0
+ * eliminates moving chromatic bands on this C3M1 board at ~29.4 FPS.
+ * Apply it at the same place as v0.1.54 T4 live experiment, AFTER the
+ * original register table; this preserves that field-tested write order.
+ * RAW/DNG has a separate initialization table and is NOT modified.
+ * Define C3_RGB_PLL4_DEFAULT=0 for a byte-identical legacy 8x rollback. */
+#ifndef C3_RGB_PLL4_DEFAULT
+#define C3_RGB_PLL4_DEFAULT 1
+#endif
+#if (C3_RGB_PLL4_DEFAULT != 0) && (C3_RGB_PLL4_DEFAULT != 1)
+#error "C3_RGB_PLL4_DEFAULT must be 0 or 1"
+#endif
+
+/* v0.1.52 read-only sensor-bar clock diagnostics.
+ * Neither flag is permitted in the write-capable mainline or still capture.
+ * Phase: COM10[4]=1 reverses sensor PCLK (AL422B WCK is directly wired).
+ * Slow: COM4[7:6]=01 selects 4x PLL (production preview since v0.1.55).
+ * The FIFO read path, LCD DMA, color order and SCCB RX are unchanged. */
+#ifndef C3_TEST_PCLK_INV
+#define C3_TEST_PCLK_INV 0
+#endif
+#ifndef C3_TEST_PLL4
+#define C3_TEST_PLL4 0
+#endif
+#if ((C3_TEST_PCLK_INV != 0) && (C3_TEST_PCLK_INV != 1)) || ((C3_TEST_PLL4 != 0) && (C3_TEST_PLL4 != 1))
+#error "C3_TEST_PCLK_INV and C3_TEST_PLL4 must be 0 or 1"
+#endif
+/* v0.1.54: field-tested slow clock options can now be tested on a
+ * READ-ONLY *live* preview as well as the original sensor color bars.
+ * Do not permit PCLK polarity reversal in normal live preview. */
+#if C3_TEST_PCLK_INV && (!C3_PREVIEW_PROBE || C3_FIFO_PROBE || !C3_CAM_COLOR_BAR)
+#error "PCLK inversion is only supported in a read-only sensor colorbar probe"
+#endif
+#if C3_TEST_PLL4 && (!C3_PREVIEW_PROBE || C3_FIFO_PROBE)
+#error "PLL4 experiment requires a read-only preview probe"
+#endif
+/* v0.1.53: isolate the sensor clock rate without changing PCLK polarity.
+ * 6x PLL tests the speed between v0.1.52 8x (banding) and 4x (improved).
+ * 8x PLL with CLKRC=1 divides the sensor's internal clock by another 2;
+ * compare to 4x/CLKRC=0 to separate effective rate from PLL setting.
+ * Both options are read-only sensor-colorbar diagnostics. */
+#ifndef C3_TEST_PLL6
+#define C3_TEST_PLL6 0
+#endif
+#ifndef C3_TEST_CLKDIV2
+#define C3_TEST_CLKDIV2 0
+#endif
+#if ((C3_TEST_PLL6 != 0) && (C3_TEST_PLL6 != 1)) || \
+    ((C3_TEST_CLKDIV2 != 0) && (C3_TEST_CLKDIV2 != 1))
+#error "C3_TEST_PLL6 and C3_TEST_CLKDIV2 must be 0 or 1"
+#endif
+#if (C3_TEST_PLL6 + C3_TEST_CLKDIV2 + C3_TEST_PLL4 + C3_TEST_PCLK_INV) > 1
+#error "Only one sensor clock diagnostic option may be active at a time"
+#endif
+#if C3_TEST_PLL6 && (!C3_PREVIEW_PROBE || C3_FIFO_PROBE || !C3_CAM_COLOR_BAR)
+#error "PLL6 experiment remains restricted to sensor colorbar mode"
+#endif
+#if C3_TEST_CLKDIV2 && (!C3_PREVIEW_PROBE || C3_FIFO_PROBE)
+#error "CLKRC division experiment requires a read-only preview probe"
+#endif
 #include "ov7725.h"
 #include "c3_zoom.h"
+#ifndef C3_RAW_CLKRC
+#define C3_RAW_CLKRC 0u
+#endif
+#if (C3_RAW_CLKRC != 0u) && (C3_RAW_CLKRC != 1u)
+#error "C3_RAW_CLKRC must be 0 or 1"
+#endif
 #include "c3_rgb_timing.h"
+#ifndef C3_RAW_FREEZE_AWB
+#define C3_RAW_FREEZE_AWB 1
+#endif
 #include "ov7725cfg.h"
 #include "../../SYSTEM/delay/delay.h"
 
@@ -121,6 +229,7 @@ static uint8_t verify_static_reg(uint8_t reg, uint8_t expected, uint8_t mask)
         actual = ov7725_read_reg(reg);
         if (reg == COM13) blc_last_readback = actual;
         if (((uint8_t)(actual ^ expected) & mask) == 0u) return 1u;
+#if C3_SCCB_RESTART_VERIFY
         /* The alternative transaction is only accepted when it independently
          * matches the EXPECTED bits, not merely because it is non-0xFF.
          * Do not rewrite registers during verification. */
@@ -132,6 +241,7 @@ static uint8_t verify_static_reg(uint8_t reg, uint8_t expected, uint8_t mask)
             ++c3_sccb_restart_successes;
             return 1u;
         }
+#endif
         delay_ms(2u);
     }
     c3_ov_last_bad_reg = reg;
@@ -239,6 +349,7 @@ uint8_t ov7725_init(void)
     reg <<= 8;
     {
         uint8_t midl = ov7725_read_reg(0X1du);
+#if C3_SCCB_RESTART_VERIFY
         /* 7FFF is allowed by the inherited driver, but the documented
          * OV7725 MIDL is A2. Try an independent read if it is FF. */
         if (midl == 0xFFu) {
@@ -250,6 +361,7 @@ uint8_t ov7725_init(void)
                 ++c3_sccb_restart_successes;
             }
         }
+#endif
         reg |= midl;
     }
     c3_ov_last_mid = reg;
@@ -271,12 +383,15 @@ uint8_t ov7725_init(void)
         return 2;
     }
 
+#if C3_ZOOM_AE_LOCK
     /* Do this before the first table write as well: reset defaults can
      * permit auto exposure even when COM5's night bit is clear. */
     if(ov7725_write_reg(COM8,0xF8u)||ov7725_write_reg(COM5,0u))return 3u;
+#endif
     /* 初始化 OV7725,采用QVGA分辨率(320*240) */
     for (i = 0; i < sizeof(ov7725_init_reg_tb1) / sizeof(ov7725_init_reg_tb1[0]); i++)
     {
+#if C3_ZOOM_AE_LOCK
         /* RGB initialization must not run auto exposure/night mode before
          * the actual P/S/M (or magnification hold) is applied. */
         uint8_t addr=ov7725_init_reg_tb1[i][0];
@@ -284,18 +399,41 @@ uint8_t ov7725_init(void)
         if(addr==COM8) value=0xF8u;
         if(addr==COM5) value=0u;
         if(ov7725_write_reg(addr,value))return 3;
+#else
+        if (ov7725_write_reg(ov7725_init_reg_tb1[i][0],
+                             ov7725_init_reg_tb1[i][1])) return 3;
+#endif
     }
 
     /* Apply RGB565 direction AFTER the old table's COM3=0x50.
      * v27 0x90/0xB0 left a horizontal mirror; v28 re-enables COM3[6],
      * yielding 0xD0/0xF0.  COM3[5] tests RGB B/R sequence separately.
      * RAW8/DNG setup is unchanged. SCCB readback remains unverified. */
-    (void)ov7725_write_reg(COM3, (uint8_t)C3_CAM_COM3_RGB);
+    (void)ov7725_write_reg(COM3, (uint8_t)(C3_CAM_COM3_RGB |
+                                (C3_CAM_COLOR_BAR ? 0x01u : 0x00u)));
 
+#if C3_TEST_PLL4 || (C3_RGB_PLL4_DEFAULT && !C3_TEST_PLL6 && \
+                       !C3_TEST_CLKDIV2 && !C3_TEST_PCLK_INV)
     /* v0.1.55 mainline: same post-table COM4 write as field-tested T4.
      * Explicit v0.1.53 clock experiments still select their own PLL/CLKRC.
      * The separate RAW table remains COM4=0x41, CLKRC=0x01. */
     (void)ov7725_write_reg(COM4, 0x41u);
+#endif
+#if C3_TEST_PLL6
+    /* OV7725 COM4[7:6]=10 = PLL 6x; original COM4[5:0] kept at 0x01. */
+    (void)ov7725_write_reg(COM4, 0x81u);
+#endif
+#if C3_TEST_CLKDIV2
+    /* Original table: PLL 8x, CLKRC=0. CLKRC=1 reduces the internally
+     * derived clock nominally by 2, without changing PLL multiplication.
+     * This may affect exposure/frame cadence; strictly a colorbar probe. */
+    (void)ov7725_write_reg(CLKRC, 0x01u);
+#endif
+#if C3_TEST_PCLK_INV
+    /* Reverses OV7725 PCLK without changing GPIO or the FIFO read loop.
+     * COM10 is otherwise left at its sensor reset/default value. */
+    (void)ov7725_write_reg(COM10, 0x10u);
+#endif
 
     if (!verify_blc_config(0u, &c3_ov_blc_rgb_readback)) return 4u;
 
@@ -304,10 +442,21 @@ uint8_t ov7725_init(void)
      * we've observed 0x94 returning FF on hardware. The separate PID and
      * VSYNC checks in c3_camera.c remain mandatory.
      * Do NOT extend this relaxation to RAW8 recording. */
+#if C3_PREVIEW_PROBE
+    preview_verify_warn(MTX1, 0xB0u, 0xFFu, C3_OV_WARN_MTX1);
+    preview_verify_warn(MTX2, 0x9Du, 0xFFu, C3_OV_WARN_MTX2);
+    preview_verify_warn(DSP_Ctrl4, 0x00u, 0x03u, C3_OV_WARN_DSP4);
+#elif C3_RGB_VERIFY_WARN_ONLY
     /* Mainline RGB565 only: warn for FF, stop for other wrong values. */
     if (!rgb_verify_or_warn_if_ff(MTX1, 0xB0u, 0xFFu, C3_OV_WARN_MTX1)) return 4u;
     if (!rgb_verify_or_warn_if_ff(MTX2, 0x9Du, 0xFFu, C3_OV_WARN_MTX2)) return 4u;
     if (!rgb_verify_or_warn_if_ff(DSP_Ctrl4, 0x00u, 0x03u, C3_OV_WARN_DSP4)) return 4u;
+#else
+    /* Original v0.1.25 strict gate. */
+    if (!verify_static_reg(MTX1, 0xB0u, 0xFFu)) return 4u;
+    if (!verify_static_reg(MTX2, 0x9Du, 0xFFu)) return 4u;
+    if (!verify_static_reg(DSP_Ctrl4, 0x00u, 0x03u)) return 4u;
+#endif
     return 0;
 }
 
@@ -333,19 +482,42 @@ uint8_t ov7725_RAW_init(void)
     if (ov7725_write_reg(COM7, 0x80)) return 1;
     delay_ms(50);
     for (uint16_t i=0;i<sizeof(ov7725_init_reg_tbRAW)/sizeof(ov7725_init_reg_tbRAW[0]);i++) {
+#if C3_RAW_CLKRC == 1 && !C3_RAW_FREEZE_AWB
+        /* Literal legacy sequence for byte-exact rollback and slow RAW. */
+        if (ov7725_write_reg(ov7725_init_reg_tbRAW[i][0],
+                             ov7725_init_reg_tbRAW[i][1])) return 2;
+#else
         uint8_t reg = ov7725_init_reg_tbRAW[i][0];
         uint8_t val = ov7725_init_reg_tbRAW[i][1];
         /* RAW CLKRC=0 is experimental: PLL4 and other settings unchanged. */
         if (reg == CLKRC) val=(uint8_t)C3_RAW_CLKRC;
+#if C3_RAW_FREEZE_AWB
         if (reg == COM8) val=0x00u; /* no RAW auto white balance */
+#endif
         if (ov7725_write_reg(reg,val)) return 2;
+#endif
     }
     if (!verify_blc_config(1u, &c3_ov_blc_raw_init_readback)) return 4u;
+#if C3_RAW_VERIFY_WARN_IF_FF
+    /* Experimental RAW8 ONLY: continue for FF readbacks while retaining
+     * warning telemetry. Other mismatches remain fatal. Sensor output
+     * format and resulting DNG data remain UNVERIFIED on physical hardware. */
+    if (!rgb_verify_or_warn_if_ff(MTX1, 0xB0u, 0xFFu, C3_OV_WARN_MTX1)) return 4u;
+    if (!rgb_verify_or_warn_if_ff(DSP_Ctrl4, 0x02u, 0x03u, C3_OV_WARN_DSP4)) return 4u;
+#else
     if (!verify_static_reg(MTX1, 0xB0u, 0xFFu)) return 4u;
     if (!verify_static_reg(DSP_Ctrl4, 0x02u, 0x03u)) return 4u;
+#endif
     return 0;
 }
 
+#ifndef C3_FAST_RAW_SWITCH
+#define C3_FAST_RAW_SWITCH 0
+#endif
+#if C3_FAST_RAW_SWITCH
+#if (C3_RAW_CLKRC != 0u) || (C3_RGB_PLL4_DEFAULT != 1)
+#error "RAW differential switch needs preview PLL4 CLKRC0 and RAW CLKRC0"
+#endif
 /* Only skip RAW registers with known invariant values in the production
  * RGB565 preview (not exposure/AE/AGC/window/format-dependent state).
  * The RAW table is still authoritative. This deliberately does not change
@@ -354,7 +526,11 @@ static uint8_t raw_same_as_preview(uint8_t reg, uint8_t val)
 {
     switch (reg) {
     case COM4: return (uint8_t)(val == 0x41u);
+    #if C3_SHUTTER_DYNAMIC_TIMING
     case CLKRC: return 0u; /* preview 4X/8000 can be CLKRC=0x40 */
+#else
+    case CLKRC: return (uint8_t)(val == 0x00u);
+#endif
     case HREF: return (uint8_t)(val == 0x00u);
     case DSP_Ctrl2: case DSP_Ctrl3: return (uint8_t)(val == 0x00u);
     case BDBase: return (uint8_t)(val == 0x7Fu);
@@ -406,14 +582,20 @@ uint8_t ov7725_RAW_fast_init(void)
     c3_ov_verify_warn_mask = 0u;
     c3_ov_last_bad_reg = 0xFFu;
     OV7725_WEN(0);
+#if C3_RAW_FREEZE_AWB
     (void)ov7725_write_reg(COM8, 0x00u); /* AEC/AGC/AWB all frozen before format swap */
+#else
+    (void)ov7725_write_reg(COM8, 0x02u);
+#endif
     (void)ov7725_write_reg(COM6, 0x42u); /* Disable auto-window on COM7. */
     (void)ov7725_write_reg(COM3, 0x10u);
     for (uint16_t i = 0u; i < sizeof(ov7725_init_reg_tbRAW)/sizeof(ov7725_init_reg_tbRAW[0]); ++i) {
         uint8_t reg = ov7725_init_reg_tbRAW[i][0];
         uint8_t val = ov7725_init_reg_tbRAW[i][1];
         if (reg == CLKRC) val = (uint8_t)C3_RAW_CLKRC;
+#if C3_RAW_FREEZE_AWB
         if (reg == COM8) val = 0x00u; /* RAW mode must not restart AWB */
+#endif
         if (!raw_same_as_preview(reg, val))
             (void)ov7725_write_reg(reg, val);
     }
@@ -429,7 +611,12 @@ uint8_t ov7725_RAW_fast_init(void)
     if (!verify_static_reg(DSP_Ctrl4, 0x02u, 0x03u)) return 4u;
     return 0u;
 }
+#endif
 
+#ifndef C3_FAST_RGB_RESTORE
+#define C3_FAST_RGB_RESTORE 0
+#endif
+#if C3_FAST_RAW_SWITCH && C3_FAST_RGB_RESTORE
 /* The RAW table is the authoritative end-state after a successful nonreset
  * RGB->RAW transition. Skip only identical nonvolatile entries; never skip
  * COM7, COM8, COM6, active AEC/AGC, window, or AWB control. */
@@ -471,7 +658,9 @@ uint8_t ov7725_RGB_fast_restore(void)
                                sizeof(ov7725_init_reg_tb1[0]); ++i) {
         const uint8_t reg=ov7725_init_reg_tb1[i][0];
         const uint8_t value=
+#if C3_ZOOM_AE_LOCK
             reg==COM5?0u:
+#endif
             ov7725_init_reg_tb1[i][1];
         if (reg == COM8 || reg == COM4) continue;
         if (!rgb_matches_raw_static(reg,value))
@@ -489,10 +678,15 @@ uint8_t ov7725_RGB_fast_restore(void)
     if (!verify_static_reg(DSP_Ctrl4,0x00u,0x03u)) return 4u;
     if (!verify_static_reg(COM4,0x41u,0xC0u)) return 4u;
     if (!verify_static_reg(CLKRC,0x00u,
+#if C3_SHUTTER_DYNAMIC_TIMING
                            0x7Fu
+#else
+                           0x3Fu
+#endif
                            )) return 4u;
     return 0u; /* still paused; caller re-enables preview after restoring WB */
 }
+#endif
 
 /**
  * @brief       设置图像输出窗口
@@ -528,12 +722,14 @@ uint8_t ov7725_preview_window_set(uint8_t zoom4x)
      * produces reliable data, leave EXHCH unchanged and keep preview. */
     {
         uint8_t exhch = ov7725_read_reg(EXHCH);
+#if C3_SCCB_RESTART_VERIFY
         if (exhch == 0xFFu) {
             ++c3_sccb_restart_attempts;
             c3_sccb_restart_last_reg = EXHCH;
             exhch = ov7725_read_reg_restart(EXHCH);
             if (exhch != 0xFFu) ++c3_sccb_restart_successes;
         }
+#endif
         if (exhch != 0xFFu)
             err |= ov7725_write_reg(EXHCH, (uint8_t)(exhch & 0xF8u));
     }

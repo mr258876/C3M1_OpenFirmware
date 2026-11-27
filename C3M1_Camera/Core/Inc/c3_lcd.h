@@ -9,6 +9,18 @@
  * display inversion ON (INVON 0x21).  The C3M1 panel needs inversion on,
  * even though the OEM init excerpt omitted that command. Diagnostics can
  * still switch both settings at runtime without changing FIFO pixel bytes. */
+#ifndef C3_LCD_DEFAULT_BGR
+#define C3_LCD_DEFAULT_BGR 1
+#endif
+#ifndef C3_LCD_DEFAULT_INV_ON
+#define C3_LCD_DEFAULT_INV_ON 1
+#endif
+#if (C3_LCD_DEFAULT_BGR != 0) && (C3_LCD_DEFAULT_BGR != 1)
+#error "C3_LCD_DEFAULT_BGR must be 0 or 1"
+#endif
+#if (C3_LCD_DEFAULT_INV_ON != 0) && (C3_LCD_DEFAULT_INV_ON != 1)
+#error "C3_LCD_DEFAULT_INV_ON must be 0 or 1"
+#endif
 #define C3_LCD_MADCTL_NORMAL (0x60u | (C3_LCD_DEFAULT_BGR ? 0x08u : 0u))
 #define C3_LCD_MADCTL_ROT180 (0xA0u | (C3_LCD_DEFAULT_BGR ? 0x08u : 0u))
 #define C3_LCD_MADCTL C3_LCD_MADCTL_ROT180

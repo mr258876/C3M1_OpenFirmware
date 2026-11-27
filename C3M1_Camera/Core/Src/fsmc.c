@@ -5,6 +5,13 @@
  * Override with C3_FSMC_DATAST=8,6,5,4 for conservative comparisons.
  * This does not alter the 72MHz HCLK or the FIFO RCLK timing.
  */
+#ifndef C3_FSMC_DATAST
+#define C3_FSMC_DATAST 4
+#endif
+#if (C3_FSMC_DATAST != 8) && (C3_FSMC_DATAST != 6) && \
+    (C3_FSMC_DATAST != 5) && (C3_FSMC_DATAST != 4)
+#error "C3_FSMC_DATAST must be 8, 6, 5 or 4 for this controlled experiment"
+#endif
 
 SRAM_HandleTypeDef hsram1;
 void MX_FSMC_Init(void)

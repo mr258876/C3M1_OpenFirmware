@@ -1,4 +1,5 @@
 #include "c3_i18n.h"
+#if C3_I18N
 #include "c3_font.h"
 #include "c3_i18n_data.inc"
 static uint8_t use_zh;
@@ -72,13 +73,16 @@ void c3_ui_message(const char *key)
     c3_lcd_rect(22,97,276,38,0);
     c3_ui_text((320-w)/2,116-(7*scale)/2,key,0xFFFFu,scale);
 }
+#endif
 
 #include "c3_ui_hints.h"
+#if C3_UI_ICONS
 /* Original 1-bit artwork, one row per word, most significant used bit left.
  * ISO and 4X use the legacy 5x7 font within matching outlined keycaps. */
 static const uint32_t dial_icon[14]={0xFC0u,0x3030u,0x4848u,0x8004u,0x1208Au,0x10102u,0x10202u,0x10402u,0x10002u,0x1200Au,0x8004u,0x4848u,0x3030u,0xFC0u};
 static const uint32_t shot_icon[14]={0xFC0u,0x3030u,0x4008u,0x8FC4u,0x11022u,0x12012u,0x12012u,0x12012u,0x12012u,0x11022u,0x8FC4u,0x4008u,0x3030u,0xFC0u};
 static const uint32_t film_icon[14]={0x0u,0xCu,0x12u,0x22u,0x44u,0x88u,0x110u,0x220u,0x440u,0x3F880u,0x40100u,0x40200u,0x3FC00u,0x0u};
+#if C3_STARTUP_HINT
 #include "c3_startup_hint.h"
 void c3_ui_draw_startup_hint(void)
 {
@@ -115,6 +119,7 @@ void c3_ui_draw_startup_hint(void)
         for(int c=0;c<8;c++)c3_lcd_pixel_stream(0u);
     }
 }
+#endif
 static void hint_bitmap(int x,int y,int w,const uint32_t *rows,uint16_t color)
 {
     for(int r=0;r<14;r++){
@@ -152,3 +157,4 @@ void c3_ui_hint(int x,int y,c3_hint_key_t key,const char *action,uint16_t color)
     }
     c3_ui_text(x+w+4,y+4,action,color,1);
 }
+#endif

@@ -14,10 +14,13 @@ void c3_ui_nav_reset(c3_ui_nav_t *s, uint8_t raw_dial, uint32_t now_ms)
     s->dial_changed_ms = now_ms;
     s->inhibit_film = 0u;
     s->confirm_armed = 0u;
+#if C3_LANGUAGE_SETUP
     s->language_choice = 0u;
     s->language_required = 0u;
+#endif
     s->ev_step_delta = 0;
 }
+#if C3_LANGUAGE_SETUP
 void c3_ui_nav_language(c3_ui_nav_t *s, uint8_t raw_dial, uint32_t now_ms,
                         uint8_t choice, uint8_t required)
 {
@@ -26,6 +29,7 @@ void c3_ui_nav_language(c3_ui_nav_t *s, uint8_t raw_dial, uint32_t now_ms,
     s->language_choice=!!choice;
     s->language_required=!!required;
 }
+#endif
 static int poll_rotary_delta(c3_ui_nav_t *s, uint8_t raw_dial,
                              uint32_t now_ms)
 {
@@ -43,6 +47,9 @@ static int poll_rotary_delta(c3_ui_nav_t *s, uint8_t raw_dial,
     int step = (forward <= 7u) ? (int)forward : (int)forward-16;
     if (step > 4) step=4; /* bounce/skipped contacts */
     if (step < -4) step=-4;
+#if C3_UI_REVERSE_DIAL
+    step = -step;
+#endif
     return step;
 }
 static void track_selection(c3_ui_nav_t *s, int steps)
@@ -62,6 +69,7 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
     s->ev_step_delta = 0;
     uint8_t film_was_inhibited = s->inhibit_film;
     if (!(stable_pressed & FILM)) s->inhibit_film = 0u;
+#if C3_LANGUAGE_SETUP
     if (s->page == C3_UI_LANGUAGE) {
         /* Both entry and failed writes require a fresh unchorded press.
          * SHOT can cancel only an optional language change. The caller
@@ -84,6 +92,7 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
         if (stable_pressed || keys.pressed) s->confirm_armed=0u;
         return a;
     }
+#endif
     if (s->page == C3_UI_PREVIEW) {
         /* Do not open MODE on a short tap. A chord pressed while the lever
          * is still below 650ms must not hijack ISO gain or preview zoom.
@@ -119,12 +128,14 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
             s->dial_changed_ms = now_ms;
             return C3_NAV_MENU_OPEN;
         }
+#if C3_PLAYBACK_ENABLE
         if (keys.pressed & C3_BTN_ISO) {
             s->page = C3_UI_PLAY;
             s->dial_stable = s->dial_candidate = (uint8_t)(raw_dial & 15u);
             s->dial_changed_ms = now_ms;
             return C3_NAV_PLAY_OPEN;
         }
+#endif
         int movement = poll_rotary_delta(s, raw_dial, now_ms);
         if (movement) {
             /* MODE EV direction is opposite the old mapping; leave SETTINGS scroll unchanged. */
@@ -133,6 +144,7 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
         }
         return a;
     }
+#if C3_PLAYBACK_ENABLE
     if (s->page == C3_UI_PLAY) {
         if (keys.pressed & SHOT) {
             s->page = C3_UI_PREVIEW;
@@ -146,6 +158,8 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
         }
         return C3_NAV_NONE;
     }
+#endif
+#if C3_MENU_ACTIONS
     if (s->page == C3_UI_CONFIRM) {
         /* Fresh ISO press after all keys released; shutter takes precedence. */
         if (keys.pressed & SHOT) {
@@ -165,6 +179,8 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
         if (stable_pressed || keys.pressed) s->confirm_armed=0u;
         return C3_NAV_NONE;
     }
+#endif
+#if C3_FUNCTION_MENU
     if (s->page == C3_UI_ABOUT) {
         if (keys.pressed & SHOT) {
             s->page=C3_UI_MENU;
@@ -174,6 +190,7 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
         }
         return C3_NAV_NONE;
     }
+#endif
     /* MENU: shutter always exits. The 4X down edge changes the highlighted
      * setting; it cannot also trigger monochrome from the preview shortcut. */
     if (keys.pressed & SHOT) {
@@ -182,15 +199,25 @@ uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
         return C3_NAV_BACK;
     }
     if ((keys.pressed & ZOOM) && settings) {
+#if C3_LANGUAGE_SETUP
         if (s->selected==C3_SETTING_LANGUAGE) return C3_NAV_LANGUAGE_OPEN;
+#endif
+#if C3_MENU_ACTIONS
         if (s->selected==C3_SETTING_RESET || s->selected==C3_SETTING_FORMAT) {
             s->page=C3_UI_CONFIRM; s->confirm_armed=0u;
             return C3_NAV_CONFIRM_OPEN;
         }
+#endif
+#if C3_FUNCTION_MENU
         if (s->selected==C3_SETTING_ABOUT) {
             s->page=C3_UI_ABOUT;
             return C3_NAV_ABOUT_OPEN;
         }
+#else
+        if (s->selected == C3_SETTING_BATTERY) {
+            a |= C3_NAV_CURSOR; /* Refresh reading without saving Flash. */
+        } else
+#endif
         {
             c3_settings_next(settings,s->selected);
             a |= C3_NAV_SETTING;

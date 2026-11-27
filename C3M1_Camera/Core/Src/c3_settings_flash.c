@@ -75,6 +75,7 @@ uint8_t c3_settings_flash_save(const c3_settings_t *settings)
     return c3_settings_record_valid(&verify);
 }
 
+#if C3_LANGUAGE_SETUP
 uint8_t c3_settings_flash_confirm_language(c3_settings_t *settings, uint8_t zh)
 {
     if (!c3_settings_valid(settings) || zh > 1u) return 0u;
@@ -84,3 +85,4 @@ uint8_t c3_settings_flash_confirm_language(c3_settings_t *settings, uint8_t zh)
     *settings = next;
     return 1u;
 }
+#endif

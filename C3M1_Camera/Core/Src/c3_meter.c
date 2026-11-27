@@ -1,5 +1,8 @@
 #include "c3_meter.h"
 #include <stddef.h>
+#ifndef C3_METER_DIAG
+#define C3_METER_DIAG 0
+#endif
 
 /* OV7725 Rev 1.4, Device Control Register List:
  * GAIN = 0x00; AECH = 0x08; AEC = 0x10.
@@ -110,9 +113,10 @@ void c3_meter_update_warning(c3_meter_t *m, uint8_t shoot_mode,
 
     /* Old global init warning flags include unrelated RGB matrix registers.
      * Validate the actual AEC/AGC configuration instead. Also reject the
-     * common all-FF floating bus pattern. Read the control registers only if a warning is possible. */
+     * common all-FF floating bus pattern. Diagnostic reads all controls on
+     * every sample; mainline only does so if a warning is possible. */
     uint8_t config_ok=1u;
-    if (candidate!=C3_METER_WARN_NONE)
+    if (C3_METER_DIAG || candidate!=C3_METER_WARN_NONE)
         config_ok=warning_read_controls(m,shoot_mode,aeb,aew,read_reg);
     if (!config_ok) {
         m->warning_reason=C3_METER_REASON_CONFIG;

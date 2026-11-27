@@ -8,9 +8,13 @@ enum { C3_POST_DONE=0, C3_POST_REVIEW, C3_POST_WIND };
 typedef struct { uint32_t start; uint8_t state,wind; } c3_postshot_t;
 static inline c3_postshot_t c3_postshot_begin(uint8_t review,uint8_t wind,uint32_t now)
 {
+#if C3_POSTSHOT_IMMEDIATE
     /* Winding takes priority: the caller has already displayed the photo
      * (if enabled). Show the wind hint now, with no timed review phase. */
     c3_postshot_t s={now,wind?C3_POST_WIND:review?C3_POST_REVIEW:C3_POST_DONE,!!wind};
+#else
+    c3_postshot_t s={now,review?C3_POST_REVIEW:wind?C3_POST_WIND:C3_POST_DONE,!!wind};
+#endif
     return s;
 }
 static inline void c3_postshot_poll(c3_postshot_t *s,uint16_t pressed,uint32_t now)

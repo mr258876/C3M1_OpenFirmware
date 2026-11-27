@@ -1,4 +1,5 @@
 #include "c3_playback.h"
+#if C3_PLAYBACK_ENABLE
 #include "c3_play_decode.h"
 #include "c3_storage.h"
 #include "c3_lcd.h"
@@ -55,14 +56,22 @@ static void bar(const c3_playback_t *s)
     c3_ui_text(6,3,"PLAY",0xFFFFu,2);
     if(s->key){char path[16];c3_play_path(s->key,path);c3_lcd_text(96,3,path+6,0xFFFFu,2);}
     c3_lcd_rect(0,224,320,16,0x0000u);
+#if C3_UI_ICONS
     c3_ui_hint(6,224,C3_HINT_DIAL,"PREV/NEXT",0xFFFFu);
     c3_ui_hint(122,224,C3_HINT_ISO,"INFO",0xFFFFu);
     c3_ui_hint(222,224,C3_HINT_SHOT,"BACK",0xFFFFu);
+#else
+    c3_ui_text(6,228,"DIAL PREV/NEXT   ISO INFO   SHOT BACK",0xFFFFu,1);
+#endif
 }
 static uint8_t message(const c3_playback_t *s,const char *text,uint8_t ok)
 {
     c3_lcd_fill(0x0841u);
+#if C3_POSTSHOT
     if(s->info!=2u)bar(s);
+#else
+    bar(s);
+#endif
     c3_ui_message(text);
     if(!ok)c3_storage_invalidate();
     return ok;
@@ -72,7 +81,11 @@ static uint8_t draw(c3_playback_t *s)
     if(!s->key)return message(s,"NO PHOTOS",1);
     char path[16];c3_play_path(s->key,path);FIL file;
     c3_lcd_fill(0x0841u);
+#if C3_POSTSHOT
     if(s->info!=2u)bar(s);
+#else
+    bar(s);
+#endif
     c3_ui_message("LOADING");
     FRESULT res=f_open(&file,path,FA_READ);
     if(res!=FR_OK)return message(s,res==FR_NO_FILE?"FILE MISSING":"READ ERROR",res==FR_NO_FILE);
@@ -86,8 +99,13 @@ static uint8_t draw(c3_playback_t *s)
              * even for Orientation=3 / bottom-up BMP. Finish before the
              * next window, so LCD DMA's own row recovery is still valid. */
             c3_lcd_window(0,dest,319,dest);
+#if C3_LCD_DMA_ENABLE
             c3_lcd_dma_begin();c3_play_render_row(&image,row,c3_lcd_dma_line(dest));
             c3_lcd_dma_submit(dest);c3_lcd_dma_finish();
+#else
+            uint8_t out[640];c3_play_render_row(&image,row,out);
+            for(unsigned i=0;i<640;i++)c3_lcd_write_byte_fast(out[i]);
+#endif
         }
     }
     res=f_close(&file);
@@ -96,6 +114,7 @@ static uint8_t draw(c3_playback_t *s)
     if(s->info==1u)bar(s);
     return 1;
 }
+#if C3_POSTSHOT
 uint8_t c3_playback_show_saved(uint32_t number,c3_output_format_t format)
 {
     /* info=2 is the private immediate-review mode: no browsing hints. */
@@ -105,6 +124,7 @@ uint8_t c3_playback_show_saved(uint32_t number,c3_output_format_t format)
     s.key=number*2u+(format==C3_OUTPUT_DNG?1u:0u);
     return draw(&s);
 }
+#endif
 uint8_t c3_playback_enter(c3_playback_t *s)
 {
     s->key=0;s->info=1;
@@ -128,3 +148,4 @@ uint8_t c3_playback_toggle_info(c3_playback_t *s)
     if(!s->key)return c3_playback_enter(s);
     s->info^=1u;return draw(s);
 }
+#endif

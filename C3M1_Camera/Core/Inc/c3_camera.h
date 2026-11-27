@@ -6,6 +6,9 @@
 #include "c3_meter.h"
 /* AL422B preview ring schedule. The producer is VSYNC EXTI, the consumer
  * is the foreground full-screen renderer. RAW still uses a one-shot mode. */
+#ifndef C3_PREVIEW_PIPELINE
+#define C3_PREVIEW_PIPELINE 1
+#endif
 /* Set the selected sensor preview mode; persists across RAW still capture. */
 /* 0=OK; 1=sensor SCCB/init; 2=window setup; 3=exposure apply. */
 extern volatile uint32_t c3_camera_last_init_stage;
@@ -27,13 +30,17 @@ void c3_camera_preview_stop(void);
 /* Wait for two fresh VSYNC edges while FIFO scheduler is OFF. */
 uint8_t c3_camera_wait_zoom_frame(void);
 uint8_t c3_camera_raw_init(void);
+#if C3_FAST_RAW_SWITCH
 /* Bench-only no-reset RAW switch, with automatic full-init fallback. */
 uint8_t c3_camera_raw_fast_init(void);
 extern volatile uint32_t c3_camera_raw_fast_path_used;
 extern volatile uint32_t c3_camera_raw_fast_fallbacks;
+#if C3_FAST_RGB_RESTORE
 /* Fail-closed RAW8 -> RGB565; on success it keeps the sensor's live AWB
  * registers and AEC/GAIN under caller control, and does NOT arm FIFO. */
 uint8_t c3_camera_rgb_fast_restore(void);
+#endif
+#endif
 /* Capture one fresh full-FOV 320x240 RGB565 still for BMP output. */
 uint8_t c3_camera_bmp_init(void);
 /* v0.1.62 experimental 1X BMP shutter path: keep live RGB565 sensor/AEC/AGC,
@@ -80,4 +87,40 @@ void c3_camera_preview_draw(const c3_settings_t *settings, uint8_t zoom4x,
                             uint8_t gain_step, uint8_t raw_dial_code,
                             int8_t ev_half_steps, uint8_t ev_active,
                             const c3_meter_t *meter);
+#ifndef C3_PREVIEW_PROFILE
+#define C3_PREVIEW_PROFILE 0
+#endif
+#ifndef C3_ROW_DETAIL_PROFILE
+#define C3_ROW_DETAIL_PROFILE 0
+#endif
+#if C3_ROW_DETAIL_PROFILE != 0 && C3_ROW_DETAIL_PROFILE != 1 && C3_ROW_DETAIL_PROFILE != 2
+#error "C3_ROW_DETAIL_PROFILE must be 0, 1, or 2"
+#endif
+#if C3_ROW_DETAIL_PROFILE && (!C3_PREVIEW_PROFILE || !C3_STAGE_PROFILE || !C3_LCD_DMA_ENABLE)
+#error "ROW detail requires DWT, stage profiling, and LCD DMA"
+#endif
+#if C3_PEAK_PROFILE
+/* CPU wall cycles in disjoint preview stages. LCD is submit/finish time,
+ * not the bus transfer duration overlapped with processing. */
+typedef struct { uint32_t fetch,peak,score,overlay,lcd; uint8_t phase; } c3_peak_profile_t;
+extern c3_peak_profile_t c3_peak_profile;
+#endif
+#if C3_PREVIEW_PROFILE
+void c3_camera_profile_init(void);
+extern volatile uint32_t c3_preview_last_draw_cycles;
+#if C3_STAGE_PROFILE
+extern volatile uint32_t c3_preview_last_row_cycles;
+#if C3_ROW_DETAIL_PROFILE
+/* Mode 1: a=non-OSD rows, b=OSD rows (actual RowOpt2 path).
+ * Mode 2: a=FIFO GPIO fetch+store, b=OSD buffer composition (diagnostic path).
+ * Unattributed time remains in ROW; read/write cannot be split further
+ * without changing the single-pass production algorithm. */
+extern volatile uint32_t c3_preview_last_detail_a_cycles;
+extern volatile uint32_t c3_preview_last_detail_b_cycles;
+#endif
+#endif
+extern volatile uint32_t c3_preview_last_capture_ms;
+extern volatile uint32_t c3_preview_vsync_period_ms;
+uint32_t c3_camera_preview_frames_skipped(void);
+#endif
 #endif

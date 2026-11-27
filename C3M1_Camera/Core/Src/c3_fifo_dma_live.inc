@@ -1,6 +1,18 @@
-/* Four-row FIFO DMA, CPU composition and LCD DMA pipeline.
- * Peripheral setup and status polling occur outside active FIFO transfers. */
+/* v198 candidate only: block FIFO DMA + CPU + LCD DMA. All peripheral
+ * setup/polling outside active FIFO window. No change to still read path. */
+#include "c3_live_profile.h"
+#if C3_LIVE_PROFILE
+c3_live_profile_t c3_live_profile;
+static c3_live_profile_t lp;
+#define C3_LP_BEGIN() uint32_t lp_t=DWT->CYCCNT
+#define C3_LP_ADD(field) do {uint32_t n=DWT->CYCCNT; lp.field+=n-lp_t;lp_t=n;}while(0)
+#endif
 #include "c3_preview_dma_render.h"
+#include "c3_dma_unpack.h"
+#if C3_DMA_UNPACK==3
+#include "c3_dma_green.h"
+static uint8_t live_green[C3_FOCUS_W] __attribute__((aligned(4)));
+#endif
 #define C3_LIVE_ROWS C3_FIFO_DMA_LIVE_ROWS
 #define C3_LIVE_BYTES (C3_FD_BYTES*C3_LIVE_ROWS)
 #define C3_LIVE_BLOCKS (C3_FD_ROWS/C3_LIVE_ROWS)
@@ -146,13 +158,33 @@ static void live_render_block(unsigned b,const c3_live_render_t *p,uint8_t ui_vi
         uint16_t y=(uint16_t)(b*C3_LIVE_ROWS+r);
         uint8_t *line=dst+r*C3_FD_BYTES;
         const uint16_t *s=src+r*C3_FD_BYTES;
+#if C3_LIVE_PROFILE
+        uint32_t u=DWT->CYCCNT;
+#endif
+#if C3_DMA_UNPACK==1
+        c3_unpack_pack32(line,s);
+#elif C3_DMA_UNPACK==2
+        c3_unpack_asm(line,s);
+#elif C3_DMA_UNPACK==3
+        uint8_t cached=c3_dma_green_needed(p,y,peak_exp.phase);
+        if(cached)c3_unpack_fused(line,s,live_green);
+        else c3_unpack_pack32(line,s);
+#else
         for(unsigned i=0;i<C3_FD_BYTES;i+=2u) {
             uint32_t v; uint16_t packed;
             __builtin_memcpy(&v,s+i,4u);
             packed=c3_live_unpack_pair(v);
             __builtin_memcpy(line+i,&packed,2u);
         }
+#endif
+#if C3_LIVE_PROFILE
+        lp.unpack+=DWT->CYCCNT-u;
+#endif
         const uint8_t *mask=(ui_visible&&(y<C3_OSD_BAND_H||y>=C3_LCD_HEIGHT-C3_OSD_BAND_H))?c3_osd_row(y):0;
+#if C3_DMA_UNPACK==3
+        if(cached)c3_dma_green_render(line,live_green,y,mask,p,&c3_focus_state,&c3_score_state,&peak_exp);
+        else
+#endif
         c3_live_render_row(line,y,mask,p,&c3_focus_state,&c3_score_state,&peak_exp);
         if(card_red&&y>=C3_OSD_CARD_Y0&&y<C3_OSD_CARD_Y1)c3_osd_color_card_row(line,mask);
         if((shutter_auto||gain_auto)&&y>=C3_OSD_AUTO_Y0&&y<C3_OSD_AUTO_Y1)c3_osd_color_auto_row(line,mask,shutter_auto,gain_auto);
@@ -166,6 +198,11 @@ static uint8_t live_draw(const c3_live_render_t *p,uint8_t ui_visible,uint8_t ca
     uint32_t before=DWT->CYCCNT; __NOP();__NOP();__NOP();
     if(DWT->CYCCNT==before)return C3_FD_CLOCK;
     uint32_t start=before;
+#if C3_LIVE_PROFILE
+    lp=(c3_live_profile_t){0};
+    lp.area=p->peak_area; lp.peaking=p->peaking; lp.mode=p->score_mode;
+    lp.sample=p->score_sample; lp.shared=p->score_shared;
+#endif
     RCC->AHBENR|=RCC_AHBENR_DMA2EN; (void)RCC->AHBENR; __DSB();
     if(!live_session_begin(&live_plan))return C3_FD_CLOCK;
     /* Prefill block0. During block b CPU reads raw[b], FIFO writes raw[b+1],
@@ -179,19 +216,63 @@ static uint8_t live_draw(const c3_live_render_t *p,uint8_t ui_visible,uint8_t ca
         if(next)live_fifo_prepare(b+1u);
         if(prev)live_lcd_start(b-1u);
         if(next)t=live_fifo_go();
+#if C3_LIVE_PROFILE
+        uint32_t cpu_start=DWT->CYCCNT;
+#endif
         live_render_block(b,p,ui_visible,card_red,shutter_auto,gain_auto);
+#if C3_LIVE_PROFILE
+        uint32_t done=DWT->CYCCNT, work=done-cpu_start;
+        lp.cpu+=work;
+        if(work>lp.max_block)lp.max_block=work;
+        if(next){
+            uint32_t elapsed=done-t;
+            uint32_t budget=C3_LIVE_BYTES*C3_FIFO_DMA_LIVE_TICKS;
+            lp.overlap++;
+            lp.wait+=c3_live_slack(elapsed,budget);
+            if(elapsed>lp.max_overlap)lp.max_overlap=elapsed;
+            if(elapsed>budget)lp.over++;
+            /* Separate hot peaking blocks from bottom/top OSD and other
+             * rows. No peripheral read or additional pixel operation. */
+            if(p->peaking){
+                uint8_t hot=0u;
+                for(unsigned r=0;r<C3_LIVE_ROWS;++r){
+                    if(c3_peak_exp_row_active(p->peak_area,(uint16_t)(b*C3_LIVE_ROWS+r),peak_exp.phase)){hot=1u;break;}
+                }
+                if(hot){
+                    lp.peak_overlap++;
+                    if(elapsed>lp.max_peak_overlap)lp.max_peak_overlap=elapsed;
+                    if(elapsed>budget)lp.peak_over++;
+                }
+            }
+        }
+#endif
         if(next){status=live_fifo_finish(t);c3_live_last_block=b+1u;}
         if(prev){
+#if C3_LIVE_PROFILE
+            uint32_t l=DWT->CYCCNT;
+#endif
             uint8_t lcd=live_lcd_finish();
+#if C3_LIVE_PROFILE
+            lp.lcd+=DWT->CYCCNT-l;
+#endif
             if(!status&&lcd){status=lcd;c3_live_last_block=b-1u;}
         }
     }
     if(!status){live_lcd_start(C3_LIVE_BLOCKS-1u);
+#if C3_LIVE_PROFILE
+        uint32_t l=DWT->CYCCNT;
+#endif
         status=live_lcd_finish();
+#if C3_LIVE_PROFILE
+        lp.lcd+=DWT->CYCCNT-l;
+#endif
     }
     live_session_end();
     __DSB();for(volatile unsigned n=0;n<80u;++n)__NOP();
     c3_live_last_cycles=DWT->CYCCNT-start;
+#if C3_LIVE_PROFILE
+    lp.draw=c3_live_last_cycles;lp.valid=!status;c3_live_profile=lp;
+#endif
     if(!status)++c3_live_frames;
     return status;
 }

@@ -2,15 +2,35 @@
    unspecified padding/endian/unaligned memory behavior. Host-unit-tested. */
 #include "c3_dng.h"
 
+#ifndef C3_DNG_DYNAMIC_WB
+#define C3_DNG_DYNAMIC_WB 1
+#endif
+#ifndef C3_DNG_EXPERIMENTAL_MATRIX
+#define C3_DNG_EXPERIMENTAL_MATRIX 1
+#endif
 /* v0.1.65: reverse only the experimental green-magenta AWB response,
  * while preserving the red/blue ratio (our first-order CCT coordinate). */
+#ifndef C3_DNG_TINT_REVERSE
+#define C3_DNG_TINT_REVERSE 1
+#endif
 /* The 67.5% ColorMatrix1 was derived in D50 XYZ; the former D55 tag
  * described a different calibration illuminant. 0 permits exact rollback. */
+#ifndef C3_DNG_CALIBRATION_D50
+#define C3_DNG_CALIBRATION_D50 1
+#endif
+#if (C3_DNG_DYNAMIC_WB != 0 && C3_DNG_DYNAMIC_WB != 1) || \
+    (C3_DNG_EXPERIMENTAL_MATRIX != 0 && C3_DNG_EXPERIMENTAL_MATRIX != 1) || \
+    (C3_DNG_TINT_REVERSE != 0 && C3_DNG_TINT_REVERSE != 1) || \
+    (C3_DNG_CALIBRATION_D50 != 0 && C3_DNG_CALIBRATION_D50 != 1)
+#error "DNG options must be 0 or 1"
+#endif
+#if C3_DNG_TINT_REVERSE
 /* The common-mode inverse uses a 32-bit fixed point product; reject
  * out-of-range custom neutral anchors rather than silently overflowing. */
 _Static_assert((uint64_t)C3_DNG_NEUTRAL_R_PERMILLE *
                (uint64_t)C3_DNG_NEUTRAL_B_PERMILLE * 1000u <= UINT32_MAX,
                "DNG tint-reference product exceeds 32-bit range");
+#endif
 
 /* Per-shot metadata is kept until save succeeds or the user discards it;
  * storage retries reread the exact retained FIFO frame AND this same WB. */
@@ -21,6 +41,7 @@ static uint32_t captured_neutral[3] = {
 };
 static uint8_t captured_wb_valid;
 static uint8_t captured_sensor_awb[3]; /* R,G,B BEFORE tint remapping */
+#if C3_DNG_BLACK_CALIBRATION
 #include "c3_dng_black_lut.inc"
 /* DNG BlackLevelRepeatDim is row/column, not RGB order. */
 static uint16_t captured_black[4] = {1000u,1000u,1000u,1000u};
@@ -92,10 +113,13 @@ void c3_dng_capture_black_level(uint8_t dial,uint8_t commanded_gain,
     }
     c3_dng_set_black_level(dial,gain,rows);
 }
+#endif
 
 void c3_dng_begin_shot(void)
 {
+#if C3_DNG_BLACK_CALIBRATION
     for (unsigned c=0;c<4u;++c) captured_black[c]=1000u;
+#endif
     captured_neutral[0] = C3_DNG_NEUTRAL_R_PERMILLE * 100u;
     captured_neutral[1] = C3_DNG_NEUTRAL_G_PERMILLE * 100u;
     captured_neutral[2] = C3_DNG_NEUTRAL_B_PERMILLE * 100u;
@@ -130,6 +154,7 @@ uint8_t c3_dng_neutral_from_awb(uint8_t red, uint8_t green, uint8_t blue,
     uint32_t bb = ((uint32_t)green * 100000u + blue / 2u) / blue;
     if (rr < 50000u || rr > 200000u ||
         bb < 30000u || bb > 200000u) return 0u;
+#if C3_DNG_TINT_REVERSE
     /* Neutral R:G:B = (r,1,b).  The relative R/B ratio r/b controls the
      * first-order blue/red (temperature) coordinate; the product r*b
      * controls their common-mode level relative to green (tint).
@@ -152,6 +177,7 @@ uint8_t c3_dng_neutral_from_awb(uint8_t red, uint8_t green, uint8_t blue,
         fixed_b < 30000u || fixed_b > 200000u) return 0u;
     rr = fixed_r;
     bb = fixed_b;
+#endif
     out_per100k[0] = rr;
     out_per100k[1] = 100000u;
     out_per100k[2] = bb;
@@ -161,11 +187,15 @@ uint8_t c3_dng_neutral_from_awb(uint8_t red, uint8_t green, uint8_t blue,
 uint8_t c3_dng_capture_locked_awb(uint8_t r,uint8_t g,uint8_t b)
 {
     c3_dng_begin_shot();
+#if C3_DNG_DYNAMIC_WB
     uint32_t neutral[3];
     if(!c3_dng_neutral_from_awb(r,g,b,neutral))return 0u;
     for(unsigned i=0;i<3u;++i)captured_neutral[i]=neutral[i];
     captured_sensor_awb[0]=r;captured_sensor_awb[1]=g;captured_sensor_awb[2]=b;
     captured_wb_valid=1u;return 1u;
+#else
+    (void)r;(void)g;(void)b;return 0u;
+#endif
 }
 
 uint8_t c3_dng_capture_preview_awb(c3_dng_reg_reader_t read_reg)
@@ -173,6 +203,7 @@ uint8_t c3_dng_capture_preview_awb(c3_dng_reg_reader_t read_reg)
     /* Always begin a new shot with the fixed, previously tested reference.
      * Call only while the live RGB565 preview is still configured. */
     c3_dng_begin_shot();
+#if C3_DNG_DYNAMIC_WB
     if (!read_reg) return 0u;
     uint8_t com8a = 0u, com8b = 0u;
     uint8_t r0 = 0u, g0 = 0u, b0 = 0u, r1 = 0u, g1 = 0u, b1 = 0u;
@@ -199,6 +230,10 @@ uint8_t c3_dng_capture_preview_awb(c3_dng_reg_reader_t read_reg)
     captured_sensor_awb[2]=(uint8_t)(((uint16_t)b0 + b1) / 2u);
     captured_wb_valid = 1u;
     return 1u;
+#else
+    (void)read_reg;
+    return 0u;
+#endif
 }
 
 
@@ -227,6 +262,7 @@ void c3_dng_make_header(uint8_t out[C3_DNG_HEADER_BYTES])
      * v173 layout appends the camera model and profile; v179 additionally
      * appends the held neutral and per-CFA black level. Legacy layouts
      * retain their previous byte representation. */
+#if C3_DNG_BLACK_CALIBRATION
     /* 28 entries need 350 bytes. Keep both matrices in the prefix; move
      * AsShotNeutral and new RATIONAL[4] BlackLevel to the appended tail.
      * The original 112-byte profile tail is untouched. */
@@ -241,6 +277,21 @@ void c3_dng_make_header(uint8_t out[C3_DNG_HEADER_BYTES])
                    "v179 IFD/matrices overlap");
     _Static_assert(BLACK_OFS+32u == TAIL_OFS+C3_DNG_TAIL_BYTES,
                    "v179 tail layout mismatch");
+#elif C3_DNG_SOFT_PROFILE
+    enum { TAGS = 27, MATRIX_OFS = 340, NEUTRAL_OFS = 412, FORWARD_OFS = 436,
+           TAIL_OFS = C3_DNG_HEADER_BYTES + C3_DNG_STRIP_BYTES,
+           MODEL_OFS = TAIL_OFS,
+           PROFILE_OFS = TAIL_OFS + 20,
+           CURVE_OFS = TAIL_OFS + 40 };
+    _Static_assert(10u + TAGS*12u + 4u <= MATRIX_OFS,
+                   "Profile IFD overlaps ColorMatrix1");
+    _Static_assert(FORWARD_OFS + 9u*8u <= C3_DNG_HEADER_BYTES,
+                   "ForwardMatrix1 exceeds 512-byte DNG prefix");
+#elif C3_DNG_EXPERIMENTAL_MATRIX
+    enum { TAGS = 23, MODEL_OFS = 292, MATRIX_OFS = 320, NEUTRAL_OFS = 400, FORWARD_OFS = 432 };
+#else
+    enum { TAGS = 22, MODEL_OFS = 292, MATRIX_OFS = 320, NEUTRAL_OFS = 400, FORWARD_OFS = 432 };
+#endif
     static const char model[] = "C3M1 OV7725 RAW8";
     unsigned n=0;
     for (unsigned k=0;k<C3_DNG_HEADER_BYTES;k++) out[k]=0;
@@ -267,13 +318,31 @@ void c3_dng_make_header(uint8_t out[C3_DNG_HEADER_BYTES])
     ifd(out,n++,50706,1,4,0x00000401u);          /* DNGVersion=1.4 */
     ifd(out,n++,50707,1,4,0x00000101u);          /* DNGBackwardVersion=1.1 */
     ifd(out,n++,50708,2,sizeof(model),MODEL_OFS); /* UniqueCameraModel */
+#if C3_DNG_BLACK_CALIBRATION
+#if C3_DNG_ACR_MODE == 1
     ifd(out,n++,50713,3,2,0x00010001u);          /* E: 1x1 */
     ifd(out,n++,50714,5,1,BLACK_OFS);            /* E: scalar RATIONAL */
+#else
+    ifd(out,n++,50713,3,2,0x00020002u);          /* BlackLevelRepeatDim */
+    ifd(out,n++,50714,5,4,BLACK_OFS);            /* BlackLevel RATIONAL[4] BGGR */
+#endif
+#else
+    ifd(out,n++,50714,3,1,1);                     /* Legacy BlackLevel */
+#endif
     ifd(out,n++,50717,4,1,255u*C3_DNG_SCALE);      /* scale with stored samples */
     ifd(out,n++,50721,10,9,MATRIX_OFS);          /* ColorMatrix1 SRATIONAL */
     ifd(out,n++,50728,5,3,NEUTRAL_OFS);         /* AsShotNeutral RATIONAL[3] */
     ifd(out,n++,50778,3,1,
+#if C3_DNG_EXPERIMENTAL_MATRIX
+#if C3_DNG_CALIBRATION_D50
         23u); /* D50: ColorMatrix1 and ForwardMatrix1 were derived in D50 XYZ */
+#else
+        20u); /* v0.1.64 D55 declaration, exact A/B rollback */
+#endif
+#else
+        21u); /* Legacy D65 for the identity-matrix fallback */
+#endif
+#if C3_DNG_SOFT_PROFILE
     /* These tags reproduce the v0.1.72 host-generated M675_Soft.DNG.
      * Both the as-shot profile selector and embedded profile name point to
      * the same ASCII string; ProfileEmbedPolicy=0 permits profile copying. */
@@ -281,16 +350,24 @@ void c3_dng_make_header(uint8_t out[C3_DNG_HEADER_BYTES])
     ifd(out,n++,50936,2,sizeof("C3M1 Soft M675 v1"),PROFILE_OFS); /* ProfileName */
     ifd(out,n++,50940,11,18,CURVE_OFS);            /* ProfileToneCurve FLOAT pairs */
     ifd(out,n++,50941,4,1,0u);                     /* ProfileEmbedPolicy 0 */
+#endif
+#if C3_DNG_EXPERIMENTAL_MATRIX
     ifd(out,n++,50964,10,9,FORWARD_OFS);       /* ForwardMatrix1 */
+#endif
 
     /* Next IFD pointer naturally remains zero. */
+#if !C3_DNG_SOFT_PROFILE
+    for (unsigned k=0;k<sizeof(model);k++) out[MODEL_OFS+k]=(uint8_t)model[k];
+#else
     (void)model;  /* MODEL_OFS now points to the appended profile tail. */
+#endif
     /* Each SRATIONAL is signed numerator/positive denominator (1e5).
      * DNG ColorMatrix1 is XYZ D50 -> *native* camera RGB (the inverse of
      * XYZ_D50_from_sRGB * M_67.5_percent * diag(1/neutral_5250K)).
      * ForwardMatrix1 is WB-camera RGB -> XYZ D50, i.e.
      * XYZ_D50_from_sRGB * M_67.5_percent. Both use row scan order.
      * A user-selected stylistic fit, NOT a certified chart calibration. */
+#if C3_DNG_EXPERIMENTAL_MATRIX
     static const int32_t color[9] = {
        216326,-77936,-31623,
        -43403,135031, 8264,
@@ -301,14 +378,31 @@ void c3_dng_make_header(uint8_t out[C3_DNG_HEADER_BYTES])
        17495,84305,-1800,
        4656,-34114,111979
     };
+#else
+    static const int32_t color[9] = {
+        100000,0,0, 0,100000,0, 0,0,100000
+    };
+#endif
     for (unsigned i=0; i<9; ++i) {
         wr32(out, MATRIX_OFS + 8u*i, (uint32_t)color[i]);
         wr32(out, MATRIX_OFS + 8u*i + 4u, 100000u);
+#if C3_DNG_EXPERIMENTAL_MATRIX
         wr32(out, FORWARD_OFS + 8u*i, (uint32_t)forward[i]);
         wr32(out, FORWARD_OFS + 8u*i + 4u, 100000u);
+#endif
     }
+#if !C3_DNG_BLACK_CALIBRATION
+    for (unsigned i=0; i<3; ++i) {
+        wr32(out, NEUTRAL_OFS + 8u*i, captured_neutral[i]);
+        wr32(out, NEUTRAL_OFS + 8u*i + 4u, 100000u);
+    }
+#endif
 }
 
+#if C3_DNG_SOFT_PROFILE
+#if !C3_DNG_EXPERIMENTAL_MATRIX
+#error "C3M1 Soft M675 requires C3_DNG_EXPERIMENTAL_MATRIX=1"
+#endif
 /* Exact IEEE-754 FLOAT bit patterns extracted from the M675_Soft DNG
  * tested in Camera Raw.  No Cortex-M3 floating-point operations required.
  * Coordinates: (0,0),(.10,.10),(.28,.28),(.45,.448),(.62,.602),
@@ -332,12 +426,22 @@ void c3_dng_make_tail(uint8_t out[C3_DNG_TAIL_BYTES])
     for (unsigned i=0;i<sizeof(model);++i) out[i]=(uint8_t)model[i];
     for (unsigned i=0;i<sizeof(profile);++i) out[20u+i]=(uint8_t)profile[i];
     for (unsigned i=0;i<18u;++i) wr32(out,40u+i*4u,curve[i]);
+#if C3_DNG_BLACK_CALIBRATION
     for (unsigned i=0;i<3u;++i) {
         wr32(out,112u+8u*i,captured_neutral[i]);
         wr32(out,116u+8u*i,100000u);
     }
+#if C3_DNG_ACR_MODE == 1
     const uint32_t sum=(uint32_t)captured_black[0]+captured_black[1]+
                        captured_black[2]+captured_black[3];
     wr32(out,136u,(sum+2u)/4u);
     wr32(out,140u,1000u);
+#else
+    for (unsigned i=0;i<4u;++i) {
+        wr32(out,136u+8u*i,(uint32_t)captured_black[i]*C3_DNG_SCALE);
+        wr32(out,140u+8u*i,1000u);
+    }
+#endif
+#endif
 }
+#endif

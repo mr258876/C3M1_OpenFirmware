@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+variant=${1:-DMA_PROBE}
+case "$variant" in DMA_PROBE) probe=1;; REF) probe=0;; *) echo 'usage: build_v194.sh DMA_PROBE|REF' >&2; exit 2;; esac
+C3_FIFO_DMA_PROBE=$probe C3_PEAK_EXPERIMENT=4 C3_PEAK_PROFILE=0 C3_PREVIEW_PROFILE=0 \
+ C3_ROW_PACK16=0 C3_FIFO_ROW_ARM=0 C3_FIFO_ASM_MODE=0 C3_FIFO_CPU_BURST_BYTES=0 \
+ C3_DNG_ACR_MODE=1 C3_DNG_FAST_SETTLE_FRAMES=2 C3_4X_FAST_8000=1 \
+ C3_BUILD_TAG="V194_${variant}_ACR8_F2" bash build_v182.sh

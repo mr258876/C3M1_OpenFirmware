@@ -2,6 +2,10 @@
 #define C3_I18N_H
 #include <stdint.h>
 #include "c3_lcd.h"
+#ifndef C3_I18N
+#define C3_I18N 0
+#endif
+#if C3_I18N
 void c3_i18n_set_language(uint8_t chinese);
 uint8_t c3_i18n_is_chinese(void);
 const char *c3_i18n_translate(const char *key);
@@ -10,6 +14,12 @@ const char *c3_i18n_translate(const char *key);
 int c3_i18n_width(const char *text,int scale);
 void c3_ui_text(int x,int y,const char *key,uint16_t color,int scale);
 void c3_ui_message(const char *key);
+#if C3_STARTUP_HINT
 /* Opaque native-pixel boot hint, one LCD address window, no frame buffer. */
 void c3_ui_draw_startup_hint(void);
+#endif
+#else
+#define c3_ui_text c3_lcd_text
+#define c3_ui_message c3_lcd_message
+#endif
 #endif

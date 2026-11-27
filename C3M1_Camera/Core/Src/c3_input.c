@@ -1,6 +1,8 @@
 #include "c3_input.h"
 #include "c3_board_pins.h"
+#ifndef C3_INPUT_HOST_TEST
 #include "main.h"
+#endif
 
 #define ISO C3_BTN_ISO
 #define ZOOM C3_BTN_4X
@@ -16,6 +18,7 @@ static volatile uint16_t stable_mask;
 static volatile uint8_t started;
 static uint8_t divider;
 
+#ifndef C3_INPUT_HOST_TEST
 static uint32_t enter_critical(void)
 {
     uint32_t ps = __get_PRIMASK();
@@ -26,6 +29,10 @@ static void exit_critical(uint32_t ps)
 {
     if ((ps & 1u) == 0u) __enable_irq();
 }
+#else
+static uint32_t enter_critical(void) { return 0u; }
+static void exit_critical(uint32_t ps) { (void)ps; }
+#endif
 
 void c3_input_reset(uint16_t pressed_mask, uint32_t now_ms)
 {
@@ -73,8 +80,10 @@ c3_input_batch_t c3_input_take(void)
 
 void c3_input_systick(void)
 {
+#ifndef C3_INPUT_HOST_TEST
     if (!started) return;
     if (++divider < 5u) return;
     divider=0u;
     c3_input_sample((uint16_t)(~GPIOF->IDR) & INPUT_MASK, HAL_GetTick());
+#endif
 }

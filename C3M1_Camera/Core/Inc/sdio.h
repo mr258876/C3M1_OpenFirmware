@@ -33,7 +33,9 @@ extern "C" {
 /* USER CODE END Includes */
 
 extern SD_HandleTypeDef hsd;
+#if C3_SDIO_TX_DMA
 uint8_t c3_sdio_dma_is_ready(void);
+#endif
 
 /* USER CODE BEGIN Private defines */
 

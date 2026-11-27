@@ -3,7 +3,14 @@
 #include "c3_exposure.h"
 #include "c3_settings.h"
 #include "c3_lcd_dma.h"
+#include "c3_live_profile.h"
+#if C3_PROFILE_HUD || C3_PEAK_PROFILE
+#include "c3_camera.h"
+#endif
 #include <string.h>
+#ifndef C3_OSD_SHUTTER_TIME
+#define C3_OSD_SHUTTER_TIME 1
+#endif
 
 uint8_t c3_osd_mask[2][C3_OSD_BAND_H][C3_OSD_STRIDE];
 
@@ -104,8 +111,65 @@ void c3_osd_set_battery(uint8_t percent, uint8_t known)
     }
 }
 
+#if C3_PEAK_PROFILE
+static void peak_profile_time(char *p,uint32_t cycles)
+{
+    uint32_t v=cycles/(SystemCoreClock/10000u);
+    if(v>9999u)v=9999u;
+    p[0]=(char)('0'+v/1000u);p[1]=(char)('0'+v/100u%10u);
+    p[2]=(char)('0'+v/10u%10u);p[3]='.';p[4]=(char)('0'+v%10u);
+}
+#endif
+#if C3_LIVE_PROFILE
+static void live_dec(char *p,uint32_t n,unsigned digits)
+{
+    uint32_t lim=1u;for(unsigned i=0;i<digits;++i)lim*=10u;
+    if(n>=lim)n=lim-1u;
+    while(digits){p[--digits]=(char)('0'+n%10u);n/=10u;}
+}
+/* Four chars: 00.0 ms (saturated at 99.9). */
+static void live_ms(char *p,uint32_t ticks)
+{
+    uint32_t d=ticks/7200u;if(d>999u)d=999u;
+    live_dec(p,d/10u,2);p[2]='.';p[3]=(char)('0'+d%10u);
+}
+#endif
 static uint8_t last_meter_valid;
 static uint16_t last_meter_rows, last_meter_gain_x16;
+#if C3_PROFILE_HUD
+static uint32_t last_profile_vs, last_profile_wait, last_profile_draw10, last_profile_skips;
+#if C3_STAGE_PROFILE
+static uint32_t last_profile_row10, last_profile_dmaw10, last_profile_other10;
+#if C3_ROW_DETAIL_PROFILE
+static uint32_t last_profile_detail_a10, last_profile_detail_b10;
+#endif
+#endif
+static void profile_dec3(char *p, uint32_t n)
+{
+    if (n > 999u) n = 999u;
+    p[0] = (char)('0' + n / 100u);
+    p[1] = (char)('0' + (n / 10u) % 10u);
+    p[2] = (char)('0' + n % 10u);
+}
+#if C3_ROW_DETAIL_PROFILE
+/* Five characters, tenths of a millisecond: 000.0 .. 999.9. */
+static void profile_fixed_tenth(char *p, uint32_t tenths)
+{
+    if (tenths > 9999u) tenths = 9999u;
+    profile_dec3(p, tenths / 10u);
+    p[3] = '.';
+    p[4] = (char)('0' + tenths % 10u);
+}
+#endif
+static void profile_dec4(char *p, uint32_t n)
+{
+    if (n > 9999u) n = 9999u;
+    p[0] = (char)('0' + n / 1000u);
+    p[1] = (char)('0' + (n / 100u) % 10u);
+    p[2] = (char)('0' + (n / 10u) % 10u);
+    p[3] = (char)('0' + n % 10u);
+}
+#endif
 
 static void set_pixel(int x, int y)
 {
@@ -180,6 +244,7 @@ static void text(int x, int y, const char *s, unsigned scale)
     text_step(x, y, s, scale, 6u * scale);
 }
 
+#if !C3_PROFILE_HUD
 /* Four fixed 80-pixel cells; 10x14 glyphs with a 1-pixel gap. Seven
  * characters occupy at most 76 pixels, even NO CARD or G31.0XA.
  * Center each value so it never pushes a neighboring field sideways.
@@ -208,6 +273,7 @@ static void bottom_text(unsigned cell, const char *s)
     bottom_value(cell,s,0u);
 }
 
+#endif
 
 static void decimal5(uint32_t n, char out[6])
 {
@@ -250,6 +316,38 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
     uint8_t meter_valid = (uint8_t)(meter && meter->valid && shoot_mode != C3_SHOOT_M);
     uint16_t meter_rows = meter_valid ? meter->exposure_rows : 0u;
     uint16_t meter_gain_x16 = meter_valid ? meter->gain_x16 : 0u;
+#if C3_PROFILE_HUD
+    /* One-frame-late telemetry; included in the EXISTING OSD mask, so the
+     * LCD receives exactly the same full-frame transfer as the baseline.
+     * No separate GRAM writes are added by the performance HUD. */
+    uint32_t profile_vs = c3_preview_vsync_period_ms;
+    uint32_t profile_wait = c3_preview_last_capture_ms;
+    uint32_t profile_draw10 = c3_preview_last_draw_cycles / (SystemCoreClock / 10000u);
+    uint32_t profile_skips = c3_camera_preview_frames_skipped();
+#if C3_STAGE_PROFILE
+    uint32_t profile_row10 = c3_preview_last_row_cycles / (SystemCoreClock / 10000u);
+    uint32_t profile_dmaw10 = c3_lcd_dma_wait_cycles / (SystemCoreClock / 10000u);
+    /* Unattributed overhead: FSMC window, DMA reprogramming, loop setup,
+     * FIFO output gating, and unavoidable profiling instrumentation. */
+    uint32_t profile_other10 = profile_draw10 > profile_row10 + profile_dmaw10 ?
+                               profile_draw10 - profile_row10 - profile_dmaw10 : 0u;
+#if C3_ROW_DETAIL_PROFILE
+    uint32_t profile_detail_a10 = c3_preview_last_detail_a_cycles /
+                                 (SystemCoreClock / 10000u);
+    uint32_t profile_detail_b10 = c3_preview_last_detail_b_cycles /
+                                 (SystemCoreClock / 10000u);
+#if C3_ROW_DETAIL_PROFILE == 1
+    /* 192 plain rows vs 48 OSD rows: scaled OSD extra is an estimate,
+     * NOT a direct measurement of GPIO-only or OSD-only instructions. */
+    uint32_t extra_cycles = c3_preview_last_detail_b_cycles >
+                            c3_preview_last_detail_a_cycles / 4u ?
+                            c3_preview_last_detail_b_cycles -
+                            c3_preview_last_detail_a_cycles / 4u : 0u;
+    uint32_t profile_extra10 = extra_cycles / (SystemCoreClock / 10000u);
+#endif
+#endif
+#endif
+#endif
     if (valid && next_number == last_number && sd_ok == last_sd &&
         grid == last_grid && monochrome == last_mono &&
         peaking == last_peak && focus_score_enabled == last_score_enabled &&
@@ -262,7 +360,25 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
         zoom4x == last_zoom4x && output_format == last_output_format &&
         meter_valid == last_meter_valid &&
         meter_rows == last_meter_rows &&
+#if C3_PROFILE_HUD
+        profile_vs == last_profile_vs &&
+        profile_wait == last_profile_wait &&
+        profile_draw10 == last_profile_draw10 &&
+        profile_skips == last_profile_skips &&
+#if C3_STAGE_PROFILE
+        profile_row10 == last_profile_row10 &&
+        profile_dmaw10 == last_profile_dmaw10 &&
+        profile_other10 == last_profile_other10 &&
+#if C3_ROW_DETAIL_PROFILE
+        profile_detail_a10 == last_profile_detail_a10 &&
+        profile_detail_b10 == last_profile_detail_b10 &&
+#endif
+#endif
+#endif
         meter_gain_x16 == last_meter_gain_x16
+#if C3_PEAK_PROFILE || C3_LIVE_PROFILE
+        && 0 /* previous frame timings update the diagnostic mask */
+#endif
         ) return;
 
     memset(c3_osd_mask, 0, sizeof(c3_osd_mask));
@@ -274,9 +390,13 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
     text(239, 5, output_format == C3_OUTPUT_BMP ? "BMP" : "DNG", 2);
     battery_icon();
     if (zoom4x) {
+#if C3_ZOOM_AE_LOCK
         /* 22x14 zoom value, with the 23x7 AE-L badge below it. */
         text(292,1,"4X",2);
         text(291,16,"AE-L",1);
+#else
+        text(292,5,"4X",2);
+#endif
     }
     if (focus_score_enabled) {
         char score[] = {(char)('0' + focus_score / 10u),
@@ -294,12 +414,99 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
         text(133, 12, "S", 1);
         text(145, 5, fps, 2);
     }
+#if C3_PROFILE_HUD
+    /* 2x 7px glyph rows inside the existing 24px bottom OSD band.
+     * VS: period between sensor VSYNC edges in milliseconds.
+     * WAIT: acquire() blocking time, not full sensor exposure time.
+     * DRAW: FIFO->CPU/OSD->LCD DMA until completion (DWT cycle count).
+     * SKIP: cumulative FIFO producer frames dropped by the ring scheduler. */
+#if C3_STAGE_PROFILE
+#if C3_ROW_DETAIL_PROFILE == 1
+    /* Actual RowOpt2 single-pass pixel loop: no extra raw buffer.
+     * PLN+OSD approximately equals ROW; EXTRA subtracts the scaled plain
+     * row baseline and is an estimate, not isolated OSD instruction time. */
+    char profile_l1[] = "PLN 000.0 OSD 000.0";
+    char profile_l2[] = "EXTRA 000.0 ROW 000.0";
+    profile_fixed_tenth(&profile_l1[4], profile_detail_a10);
+    profile_fixed_tenth(&profile_l1[14], profile_detail_b10);
+    profile_fixed_tenth(&profile_l2[6], profile_extra10);
+    profile_fixed_tenth(&profile_l2[16], profile_row10);
+#elif C3_ROW_DETAIL_PROFILE == 2
+    /* OSD rows use a scratch buffer to isolate GPIO fetch vs composition;
+     * this intentionally differs from production single-pass RowOpt2. */
+    char profile_l1[] = "READ 000.0 MIX 000.0";
+    char profile_l2[] = "ROW 000.0 DRAW 000.0";
+    profile_fixed_tenth(&profile_l1[5], profile_detail_a10);
+    profile_fixed_tenth(&profile_l1[15], profile_detail_b10);
+    profile_fixed_tenth(&profile_l2[4], profile_row10);
+    profile_fixed_tenth(&profile_l2[15], profile_draw10);
+#else
+    /* Three disjoint CPU wall-time segments: ROW + DMAW + OTHER ~= DRAW.
+     * ROW includes all CPU FIFO reads and OSD row composition; DMAW is only
+     * the time the CPU explicitly blocks on an outstanding LCD DMA transfer.
+     * DMA transfer cycles overlapped with ROW are not double-counted. */
+    char profile_l1[] = "ROW 000.0 DW 000.0";
+    char profile_l2[] = "OTHR 000.0 DRAW 000.0";
+    profile_dec3(&profile_l1[4], profile_row10 / 10u);
+    profile_l1[8] = (char)('0' + profile_row10 % 10u);
+    profile_dec3(&profile_l1[13], profile_dmaw10 / 10u);
+    profile_l1[17] = (char)('0' + profile_dmaw10 % 10u);
+    profile_dec3(&profile_l2[5], profile_other10 / 10u);
+    profile_l2[9] = (char)('0' + profile_other10 % 10u);
+    profile_dec3(&profile_l2[16], profile_draw10 / 10u);
+    profile_l2[20] = (char)('0' + profile_draw10 % 10u);
+#endif /* C3_ROW_DETAIL_PROFILE */
+#else
+    char profile_l1[] = "VS 000ms WAIT 000ms";
+    char profile_l2[] = "DRAW 000.0ms SKIP 0000";
+    profile_dec3(&profile_l1[3], profile_vs);
+    profile_dec3(&profile_l1[14], profile_wait);
+    profile_dec3(&profile_l2[5], profile_draw10 / 10u);
+    profile_l2[9] = (char)('0' + (profile_draw10 % 10u));
+    profile_dec4(&profile_l2[18], profile_skips);
+#endif
+    text(8, 218, profile_l1, 1);
+    text(8, 229, profile_l2, 1);
+#if C3_OVERLAY_DIAG
+    /* Read-only overlay A/B: status belongs in the existing 1-bit mask. */
+    char flags[] = {'G', grid ? '1' : '0', ' ', 'P', peaking ? '1' : '0', 0};
+    text(271, 229, flags, 1);
+#endif
+#elif C3_LIVE_PROFILE
+    if(c3_live_profile.valid){
+        const c3_live_profile_t *p=&c3_live_profile;
+        char a[]="U00.0 P00.0 S00.0 C00.0 W00.0 L00.0 D00.0";
+        live_ms(a+1,p->unpack);live_ms(a+7,p->peak);live_ms(a+13,p->score);
+        live_ms(a+19,p->cpu);live_ms(a+25,p->wait);live_ms(a+31,p->lcd);live_ms(a+37,p->draw);
+        char b[]="MAX0000 X0000 I0000 O00/00 E00/00 A0 FS0 R0 H0";
+        live_dec(b+3,p->max_block/72u,4);live_dec(b+9,p->max_overlap/72u,4);
+        live_dec(b+15,p->max_peak_overlap/72u,4);
+        live_dec(b+21,p->over,2);live_dec(b+24,p->overlap,2);
+        live_dec(b+28,p->peak_over,2);live_dec(b+31,p->peak_overlap,2);
+        b[35]=(char)('0'+(p->peaking?p->area+1u:0u));
+        b[39]=(char)('0'+p->mode);b[42]=(char)('0'+p->sample);b[45]=(char)('0'+p->shared);
+        text(8,218,a,1);text(8,229,b,1);
+    }else text(8,221,"DMA PROFILE WAIT / CPU",1);
+#elif C3_PEAK_PROFILE
+    /* One frame late, no extra LCD transfer. Times are milliseconds. */
+    char pp1[]="F000.0 P000.0 S000.0 O000.0";
+    char pp2[]="L000.0 D000.0 R0";
+    peak_profile_time(pp1+1,c3_peak_profile.fetch);
+    peak_profile_time(pp1+8,c3_peak_profile.peak);
+    peak_profile_time(pp1+15,c3_peak_profile.score);
+    peak_profile_time(pp1+22,c3_peak_profile.overlay);
+    peak_profile_time(pp2+1,c3_peak_profile.lcd);
+    peak_profile_time(pp2+8,c3_preview_last_draw_cycles);
+    pp2[15]=(char)('0'+c3_peak_profile.phase);
+    text(8,218,pp1,1);text(8,229,pp2,1);
+#else
     if (sd_ok) bottom_text(1u, number);
     else if (card_visible) bottom_text(1u, "NO CARD");
     {
         static const char *const gain_labels[6] = {
             "G---", "G1X", "G2X", "G4X", "G8X", "G16X"
         };
+#if C3_OSD_SHUTTER_TIME
         /* OpenMV-style AEC-to-time, corrected for C3M1's extra EXHCL
          * horizontal dummy pixels (and 4X VGA vs 1X QVGA line length).
          * Auto uses sensor AEC readback; manual falls back to the theoretical
@@ -312,6 +519,21 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
         c3_meter_shutter_label(exp, shutter_rows,
                               c3_exposure_preview_row_ns_dial(zoom4x,shutter_code));
         bottom_value(0u, exp, shutter_code == C3_EXPOSURE_AUTO_CODE);
+#else
+        if (shutter_code == C3_EXPOSURE_AUTO_CODE && meter_valid) {
+            char exp[12];
+            c3_meter_exposure_label(exp, meter_rows, 0u);
+            bottom_value(0u, exp, shutter_code == C3_EXPOSURE_AUTO_CODE);
+        } else if (shutter_code == C3_EXPOSURE_AUTO_CODE) {
+            bottom_value(0u, "E---", 1u);
+        } else {
+            uint16_t r = c3_exposure_rows(shutter_code);
+            char exp[] = {'E', (char)('0' + r / 100u),
+                          (char)('0' + (r / 10u) % 10u),
+                          (char)('0' + r % 10u), 'L', 0};
+            bottom_value(0u, exp, shutter_code == C3_EXPOSURE_AUTO_CODE);
+        }
+#endif
         /* Use the limited OSD width for the *requested* compensation.
          * Original dial debug code remains available in the MODE view. */
         if (ev_active) {
@@ -329,6 +551,7 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
             bottom_value(3u, gain_labels[gain_step], gain_step == 0u);
         }
     }
+#endif /* C3_PROFILE_HUD */
     last_number = next_number;
     last_sd = sd_ok;
     last_grid = grid;
@@ -349,5 +572,20 @@ void c3_osd_prepare(uint32_t next_number, uint8_t sd_ok,
     last_meter_valid = meter_valid;
     last_meter_rows = meter_rows;
     last_meter_gain_x16 = meter_gain_x16;
+#if C3_PROFILE_HUD
+    last_profile_vs = profile_vs;
+    last_profile_wait = profile_wait;
+    last_profile_draw10 = profile_draw10;
+    last_profile_skips = profile_skips;
+#if C3_STAGE_PROFILE
+    last_profile_row10 = profile_row10;
+    last_profile_dmaw10 = profile_dmaw10;
+    last_profile_other10 = profile_other10;
+#if C3_ROW_DETAIL_PROFILE
+    last_profile_detail_a10 = profile_detail_a10;
+    last_profile_detail_b10 = profile_detail_b10;
+#endif
+#endif
+#endif
     valid = 1;
 }

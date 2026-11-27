@@ -108,10 +108,14 @@ extern volatile uint32_t c3_ov_blc_rgb_readback;
 extern volatile uint32_t c3_ov_blc_raw_init_readback;
 extern volatile uint32_t c3_ov_blc_raw_capture_readback;
 extern volatile uint32_t c3_ov_blc_raw_gain_readback;
+#if C3_FAST_RAW_SWITCH
 uint8_t ov7725_RAW_fast_init(void);
+#if C3_FAST_RGB_RESTORE
 /* Return RAW8 -> RGB565 without COM7 software reset. Leaves AEC/AGC/AWB off
  * for the caller to restore before re-enabling preview. */
 uint8_t ov7725_RGB_fast_restore(void);
+#endif
+#endif                      /* OV7725RAW≥ı ºªØ≤‚ ‘ */
 
 uint8_t ov7725_read_reg(uint16_t reg);
 uint8_t ov7725_read_reg_restart(uint8_t reg);

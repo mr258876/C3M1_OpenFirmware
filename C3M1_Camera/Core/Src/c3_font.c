@@ -1,4 +1,7 @@
 #include "c3_font.h"
+#ifndef C3_OSD_SHUTTER_TIME
+#define C3_OSD_SHUTTER_TIME 1
+#endif
 
 static const uint8_t glyphs[36][5] = {
     /* A */ {0x7E,0x11,0x11,0x11,0x7E},
@@ -43,9 +46,11 @@ const uint8_t *c3_font_glyph(char c)
     if (c>='a' && c<='z') c = (char)(c-32);
     if (c>='A' && c<='Z') return glyphs[c-'A'];
     if (c>='0' && c<='9') return glyphs[26 + c-'0'];
+#if C3_OSD_SHUTTER_TIME
     /* Slash is required for human shutter labels such as 1/100.
      * Previously absent; the text renderer silently discarded it. */
     if (c=='/') { static const uint8_t slash[5] = {0x60,0x10,0x08,0x04,0x03}; return slash; }
+#endif
     if (c=='.') { static const uint8_t dot[5] = {0,0,0x60,0,0}; return dot; }
     if (c==':') { static const uint8_t colon[5] = {0,0,0x14,0,0}; return colon; }
     if (c=='+') { static const uint8_t plus[5] = {0x08,0x08,0x3E,0x08,0x08}; return plus; }

@@ -34,6 +34,7 @@ uint16_t c3_sleep_breath_us(uint32_t elapsed_ms)
     if (brightness>255u) brightness=255u;
     return (uint16_t)((brightness*3000u+127u)/255u);
 }
+#ifndef C3_SLEEP_HOST_TEST
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx.h"
 /* PD9 is not a TIM2 PWM output. TIM2 generates interrupts at 250Hz;
@@ -132,3 +133,4 @@ void c3_sd_led_poll(uint32_t now_ms)
         C3_LED_OFF();
     }
 }
+#endif

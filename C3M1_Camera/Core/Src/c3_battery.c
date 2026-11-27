@@ -61,6 +61,7 @@ void c3_battery_format(char out[16], uint16_t mv)
     out[i++]='%'; out[i]=0;
 }
 
+#ifndef C3_BATTERY_HOST_TEST
 #include "stm32f1xx_hal.h"
 
 /* Lazy ADC1 init: the first read can occur after the first preview frame.
@@ -118,3 +119,4 @@ uint8_t c3_battery_read_mv(uint16_t *mv)
     *mv=c3_battery_raw_to_mv((uint16_t)((total+4u)/8u));
     return 1u;
 }
+#endif

@@ -48,6 +48,12 @@ void sccb_init(void)
  * C3_SCCB_FLOAT_READ=0 restores the old receiver for A/B rollback.
  * This does NOT prove that the output-mode anomaly is understood electrically.
  */
+#ifndef C3_SCCB_FLOAT_READ
+#define C3_SCCB_FLOAT_READ 1
+#endif
+#if (C3_SCCB_FLOAT_READ != 0) && (C3_SCCB_FLOAT_READ != 1)
+#error "C3_SCCB_FLOAT_READ must be 0 or 1"
+#endif
 
 /* v0.1.46: the hardware showed intermittent FF reads at 20us.
  * Keep a configurable half-period; 50us is the conservative boot default.
@@ -157,6 +163,7 @@ uint8_t sccb_send_byte(uint8_t data)
 uint8_t sccb_read_byte(void)
 {
     uint8_t i, receive = 0;
+#if C3_SCCB_FLOAT_READ
     /* Read ownership handoff: SCL is LOW after the device+READ ninth clock.
      * Release SDA before switching PG13 to input; preserve all other CRH
      * pin nibbles, including FIFO controls on PG14/PG15. */
@@ -165,6 +172,10 @@ uint8_t sccb_read_byte(void)
     pg13_saved = GPIOG->CRH & (0xFu << 20);
     GPIOG->CRH = (GPIOG->CRH & ~(0xFu << 20)) | (0x4u << 20);
     sccb_delay();
+#elif OV_SCCB_TYPE_NOD
+    SCCB_SDA_IN();      /*设置SDA为输入*/
+    delay_us(50);
+#endif
     for (i = 0; i < 8; i++ )    /* 接收1个字节数据 */
     {
         receive <<= 1;          /* 高位先输出,所以先收到的数据位要左移 */
@@ -179,12 +190,17 @@ uint8_t sccb_read_byte(void)
         SCCB_SCL(0);
         sccb_delay();
     }
+#if C3_SCCB_FLOAT_READ
     /* After the eighth data falling edge, release SDA (ODR=1) while
      * still an input. Restore the original open-drain mode for ninth-bit
      * NACK and STOP, performed by the caller. */
     SCCB_SDA(1);
     GPIOG->CRH = (GPIOG->CRH & ~(0xFu << 20)) | pg13_saved;
     sccb_delay();
+#elif OV_SCCB_TYPE_NOD
+    SCCB_SDA_OUT();      /*设置SDA为输出*/
+    delay_us(50);
+#endif
     return receive;
 }
 

@@ -59,4 +59,32 @@ static inline void c3_effect_grid_row(uint8_t *row, uint16_t y,
         c3_effect_patch_grid(row, 213u, mask);
     }
 }
+/* Phase 2: keep the original gradient mathematics, but run it on already
+ * captured SRAM bytes. The previous-row luma and ROI-score state updates
+ * happen in exactly the original order, for EVERY pixel, including OSD. */
+static inline void c3_effect_peak_line(uint8_t *row, uint16_t y,
+                                       c3_focus_t *focus, uint8_t threshold,
+                                       uint16_t peak_color, uint8_t monochrome,
+                                       uint8_t grid, uint8_t score_enabled,
+                                       const uint8_t *mask)
+{
+    const uint8_t grid_y = (uint8_t)(grid && (y == 80u || y == 160u));
+    const uint8_t osd_row = (uint8_t)(mask != (const uint8_t *)0);
+    for (uint16_t x = 0u; x < 320u; ++x) {
+        const uint16_t raw = c3_effect_get565(row, x);
+        const uint8_t edge = c3_focus_sample(focus, x, y, raw, threshold);
+        uint16_t c = monochrome ? c3_effect_gray565(raw) : raw;
+        if (edge) c = peak_color;
+        if (grid && (grid_y || x == 106u || x == 213u))
+            c = c3_effect_grid565(c);
+        if (score_enabled && c3_focus_roi_corner(x, y))
+            c = 0x07E0u;
+        if (osd_row) {
+            c = c3_effect_dim565(c);
+            if (c3_effect_glyph(mask, x)) c = 0xFFFFu;
+        }
+        /* Skip redundant SRAM stores on unmodified plain pixels. */
+        if (c != raw) c3_effect_put565(row, x, c);
+    }
+}
 #endif

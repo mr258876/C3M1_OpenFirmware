@@ -4,9 +4,14 @@
  * A failed DMA must never be silently retried with polling at the same LBA:
  * partial writes and filesystem metadata could already be on the card. */
 #include "c3_sd_dma_write.h"
+#if C3_SDIO_TX_DMA
 #include <string.h>
+#ifdef C3_SD_DMA_HOST_TEST
+#include "c3_sd_dma_host_shim.h"
+#else
 #include "sdio.h"
 #include "bsp_driver_sd.h"
+#endif
 
 #define C3_SD_DMA_SECTOR_BYTES 512u
 #define C3_SD_DMA_MAX_SECTORS 128u /* 128*512/4 = 16384 < 65535 DMA words */
@@ -69,3 +74,4 @@ uint8_t c3_sd_dma_write_sectors(const uint8_t *data,
     }
     return 1u;
 }
+#endif /* C3_SDIO_TX_DMA */

@@ -31,6 +31,9 @@ enum {
 };
 #define C3_UI_DIAL_SETTLE_MS 60u
 /* Set 1 at build time if the physical clockwise direction feels reversed. */
+#ifndef C3_UI_REVERSE_DIAL
+#define C3_UI_REVERSE_DIAL 0
+#endif
 
 typedef struct {
     c3_ui_page_t page;
@@ -41,13 +44,17 @@ typedef struct {
     uint32_t dial_changed_ms;
     uint8_t inhibit_film;
     uint8_t confirm_armed;
+#if C3_LANGUAGE_SETUP
     uint8_t language_choice; /* 0 English, 1 simplified Chinese */
     uint8_t language_required;
+#endif
     int8_t ev_step_delta; /* MODE EV delta or PLAY signed dial movement */
 } c3_ui_nav_t;
 void c3_ui_nav_reset(c3_ui_nav_t *s, uint8_t raw_dial, uint32_t now_ms);
+#if C3_LANGUAGE_SETUP
 void c3_ui_nav_language(c3_ui_nav_t *s, uint8_t raw_dial, uint32_t now_ms,
                         uint8_t choice, uint8_t required);
+#endif
 uint16_t c3_ui_nav_poll(c3_ui_nav_t *s, c3_button_events_t keys,
                        uint16_t stable_pressed, uint8_t raw_dial,
                        uint32_t now_ms, c3_settings_t *settings);

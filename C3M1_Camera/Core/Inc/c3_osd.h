@@ -1,6 +1,9 @@
 #ifndef C3_OSD_HEADER_INCLUDED
 #define C3_OSD_HEADER_INCLUDED
 #include <stdint.h>
+#ifndef C3_OSD_SHUTTER_TIME
+#define C3_OSD_SHUTTER_TIME 1
+#endif
 #include "c3_meter.h"
 
 /* 320x240 preview; only the top/bottom 24 rows need glyph masks.
