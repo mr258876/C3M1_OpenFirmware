@@ -51,4 +51,4 @@ Development from v0.1.0 through v0.2.21, grouped by subsystem. The earliest phas
 - Use a single build for the selected production configuration. Remove alternate firmware branches, unused application modules, obsolete IDE metadata, old build wrappers, duplicate reports and test code from the public source tree.
 - Keep the production recovery paths, settings compatibility, source dependencies, translation and calibration generators. Store the pre-cleanup experiments and test fixtures on a separate local development branch.
 - Provide the user README, development guide, this consolidated change list and dependency notices as the maintained documentation set.
-- Add the project identity, author, canonical repository URL and AGPL-3.0 license to the About page and release documentation; consolidate developer instructions into `AGENTS.md`.
+- Add the project identity, version, author, year and canonical repository URL to the About page; adopt AGPL-3.0-only in the release documentation and consolidate developer instructions into `AGENTS.md`.

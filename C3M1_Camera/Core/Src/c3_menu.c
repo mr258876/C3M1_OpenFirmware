@@ -89,11 +89,10 @@ void c3_menu_draw_about(void)
     title("ABOUT");
     identity_line(45,"C3M1 OpenFirmware",CYAN,2);
     identity_line(72,"v0.2.21",WHITE,2);
-    identity_line(99,"Copyright 2026 mr258876",WHITE,2);
-    identity_line(126,"AGPL-3.0-only",MUTED,2);
+    identity_line(99,"2026 mr258876",WHITE,2);
     /* Full canonical project URL, wrapped at a slash. */
-    identity_line(166,"https://github.com/",CYAN,2);
-    identity_line(184,"mr258876/C3M1_OpenFirmware",CYAN,2);
+    identity_line(148,"https://github.com/",CYAN,2);
+    identity_line(166,"mr258876/C3M1_OpenFirmware",CYAN,2);
     c3_lcd_rect(0,214,320,26,PANEL);
     c3_ui_hint(10,219,C3_HINT_SHOT,"BACK",WHITE);
 }
