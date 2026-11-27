@@ -49,6 +49,11 @@ Outputs:
 
 The build uses the single production configuration (ACR8 F2). `CLANG` and `LLVM_OBJCOPY` can select alternate executable paths. See [AGENTS.md](AGENTS.md) for the source map and hardware contracts.
 
+### Continuous integration
+
+The [Build firmware](https://github.com/mr258876/C3M1_OpenFirmware/actions/workflows/firmware.yml) workflow builds `main` and `dev` on pushes, pull requests, version tags and manual runs. Download the firmware artifact from a successful run; it contains HEX, BIN, ELF, MAP, SHA256SUMS and build information. The `dev` artifacts are development builds.
+
+
 ## Install
 
 Use an SWD programmer with GND, SWDIO, SWCLK and the correct target voltage reference. Back up the entire original 512 KiB Flash before erasing it. Program and verify the HEX file at its embedded addresses, then reset the camera. For BIN programming, use base address `0x08000000`.

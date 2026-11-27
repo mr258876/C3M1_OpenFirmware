@@ -78,3 +78,8 @@ BMP 与 DNG 共用 `C3_#####` 编号；失败保存可从被冻结的 FIFO 重�
 ## 许可证
 
 C3M1 OpenFirmware 项目代码采用 GNU Affero General Public License 第3版（AGPL-3.0-only），Copyright © 2026 mr258876。完整条款见 [LICENSE](LICENSE)，随项目提供的第三方组件保留各自的授权条款及版权声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+### 自动编译
+
+[Build firmware](https://github.com/mr258876/C3M1_OpenFirmware/actions/workflows/firmware.yml) 在 main、dev 更新、PR、版本标签及手动触发时编译。成功运行的 Artifacts 包含 HEX、BIN、ELF、MAP、SHA256SUMS 和构建信息；dev 产物为开发构建。
+

@@ -1,0 +1,87 @@
+name: Build firmware
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    name: STM32F103 firmware (LLVM 17)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-17 lld-17 llvm-17
+          mkdir -p "$RUNNER_TEMP/llvm17-bin"
+          for tool in clang ld.lld llvm-objcopy llvm-size; do
+            ln -sf "/usr/bin/${tool}-17" "$RUNNER_TEMP/llvm17-bin/$tool"
+          done
+          echo "$RUNNER_TEMP/llvm17-bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        shell: bash
+        env:
+          C3_BUILD_TAG: CI
+        run: |
+          set -euo pipefail
+          clang --version
+          ld.lld --version
+          llvm-objcopy --version
+          bash build.sh 2>&1 | tee build.log
+
+      - name: Verify and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f build/c3m1.elf ]]; then
+            output=build
+          elif [[ -f build_CI/c3m1.elf ]]; then
+            output=build_CI
+          else
+            echo 'Build output not found' >&2
+            exit 1
+          fi
+          for ext in hex bin elf map; do
+            test -s "$output/c3m1.$ext"
+          done
+          test "$(stat -c%s "$output/c3m1.bin")" -le $((508 * 1024))
+          llvm-objcopy -I ihex -O binary "$output/c3m1.hex" "$RUNNER_TEMP/hex-check.bin"
+          cmp "$output/c3m1.bin" "$RUNNER_TEMP/hex-check.bin"
+          llvm-size "$output/c3m1.elf"
+          mkdir -p dist
+          cp "$output"/c3m1.{hex,bin,elf,map} dist/
+          cp build.log dist/
+          {
+            printf 'Commit: %s\nRef: %s\n' "$GITHUB_SHA" "$GITHUB_REF"
+            clang --version
+            ld.lld --version
+            llvm-objcopy --version
+            llvm-size "$output/c3m1.elf"
+          } > dist/BUILD_INFO.txt
+          (cd dist && sha256sum c3m1.hex c3m1.bin c3m1.elf c3m1.map > SHA256SUMS)
+          if [[ -f LICENSE ]]; then cp LICENSE dist/; fi
+          if [[ -f THIRD_PARTY_NOTICES.md ]]; then cp THIRD_PARTY_NOTICES.md dist/; fi
+          echo "Firmware: $(stat -c%s dist/c3m1.bin) bytes" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: C3M1-firmware-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

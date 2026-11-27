@@ -7,7 +7,7 @@ Copyright (C) 2026 mr258876 · AGPL-3.0-only. See [LICENSE](LICENSE) and [THIRD_
 
 `main` is the single production firmware (v0.2.21, ACR8 F2). Run `bash build.sh` from the repository root. Clang 17, LLD, `llvm-objcopy`, Cortex-M3 Thumb, freestanding C11, full LTO and `-Os` are the baseline; the camera translation unit uses `-O3`. The linker reserves 508 KiB for code and 64 KiB for RAM. Build products belong in `build/`.
 
-The local `dev` branch in the development bundle preserves the pre-cleanup experimental configurations and host tests. Its build scripts and test fixtures match that snapshot. Keep future experiments on `dev`; port validated changes to the production tree rather than restoring every historical compile-time switch. The public branch history contains no experimental snapshot.
+The `dev` branch preserves the pre-cleanup experimental configurations and host tests. Its build scripts and test fixtures match that snapshot. Keep future experiments on `dev`; port validated changes to the production tree rather than restoring every historical compile-time switch. Keep experimental snapshots out of the main branch. The CI workflow builds both branches using LLVM 17; verify uploaded artifacts before publishing a release.
 
 ## Source map
 
